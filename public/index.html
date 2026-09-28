@@ -1,0 +1,1781 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+<meta charset="utf-8">
+
+<meta
+  name="viewport"
+  content="width=device-width,initial-scale=1,viewport-fit=cover"
+>
+
+<title>SYNCROOM</title>
+
+<style>
+
+:root{
+  --bg:#120a1f;
+  --fg:#f3ecff;
+  --mu:#a596c4;
+  --ac:#ff4d8d;
+  --am:#ffb84d;
+  --ok:#2dd4bf;
+}
+
+*{
+  box-sizing:border-box;
+}
+
+body{
+  margin:0;
+  background:
+    radial-gradient(
+      900px 500px at 50% -10%,
+      #3b1560,
+      var(--bg)
+    );
+  color:var(--fg);
+  font:16px/1.4 system-ui,-apple-system,sans-serif;
+  min-height:100vh;
+  padding:
+    env(safe-area-inset-top)
+    16px
+    env(safe-area-inset-bottom);
+}
+
+#app{
+  max-width:520px;
+  margin:auto;
+  padding-bottom:48px;
+}
+
+header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  padding:18px 0;
+}
+
+header b{
+  font-weight:800;
+  letter-spacing:.18em;
+}
+
+header i{
+  color:var(--ac);
+  font-style:normal;
+}
+
+.tag{
+  font-size:13px;
+  padding:5px 12px;
+  border-radius:99px;
+  background:#ffffff14;
+}
+
+.card{
+  background:#ffffff0d;
+  border:1px solid #ffffff1a;
+  backdrop-filter:blur(14px);
+  border-radius:22px;
+  padding:18px;
+  margin:14px 0;
+  text-align:center;
+}
+
+h1{
+  margin:14px 0 0;
+  font-size:28px;
+  text-align:center;
+}
+
+h2{
+  margin:0 0 12px;
+}
+
+.rid{
+  font:800 40px ui-monospace,monospace;
+  letter-spacing:.2em;
+  margin:4px 0;
+}
+
+.lbl{
+  color:var(--mu);
+  font-size:13px;
+}
+
+.c{
+  text-align:center;
+  color:var(--mu);
+  margin:4px 0 12px;
+}
+
+.w{
+  color:var(--am);
+}
+
+.g{
+  color:var(--ok);
+}
+
+.st{
+  text-align:center;
+  margin:8px 0;
+  min-height:24px;
+}
+
+.art{
+  display:block;
+  width:100%;
+  aspect-ratio:1;
+  border-radius:24px;
+  object-fit:cover;
+  box-shadow:0 24px 70px #ff4d8d40;
+}
+
+.art.on{
+  animation:pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes pulse{
+  50%{
+    transform:scale(1.02);
+  }
+}
+
+button{
+  min-height:48px;
+  min-width:48px;
+  border:0;
+  border-radius:14px;
+  background:#ffffff17;
+  color:var(--fg);
+  font:inherit;
+  padding:0 16px;
+  cursor:pointer;
+}
+
+button:focus-visible,
+input:focus-visible{
+  outline:2px solid var(--am);
+}
+
+button.pri{
+  background:
+    linear-gradient(
+      135deg,
+      var(--ac),
+      var(--am)
+    );
+  color:#1a0a24;
+  font-weight:700;
+}
+
+button.big{
+  width:68px;
+  height:68px;
+  border-radius:50%;
+}
+
+.end{
+  width:100%;
+  margin-top:8px;
+  background:#ff4d8d22;
+}
+
+svg{
+  width:26px;
+  height:26px;
+  fill:currentColor;
+}
+
+.row{
+  display:flex;
+  gap:10px;
+  justify-content:center;
+  align-items:center;
+  margin:14px 0;
+  flex-wrap:wrap;
+}
+
+input[type=range]{
+  width:100%;
+  accent-color:var(--ac);
+  margin:14px 0 0;
+}
+
+input#code{
+  flex:1;
+  min-height:48px;
+  border-radius:14px;
+  border:1px solid #ffffff2a;
+  background:#0003;
+  color:var(--fg);
+  font:700 20px ui-monospace,monospace;
+  text-align:center;
+  text-transform:uppercase;
+}
+
+.bar{
+  height:6px;
+  background:#ffffff1f;
+  border-radius:9px;
+  overflow:hidden;
+  margin:18px 0 0;
+}
+
+.bar>div{
+  height:100%;
+  width:0;
+  background:var(--ac);
+}
+
+.t{
+  display:flex;
+  justify-content:space-between;
+  color:var(--mu);
+  font-size:14px;
+  font-variant-numeric:tabular-nums;
+}
+
+.q{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:8px 0;
+  text-align:left;
+}
+
+.q img{
+  width:44px;
+  height:44px;
+  border-radius:8px;
+}
+
+.q span{
+  flex:1;
+  min-width:0;
+}
+
+.q button{
+  min-height:40px;
+  min-width:40px;
+  padding:0 10px;
+}
+
+.qr-box{
+  width:260px;
+  height:260px;
+  margin:18px auto;
+  padding:10px;
+  border-radius:18px;
+  background:#fff;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+.qr-box img{
+  width:100%;
+  height:100%;
+  object-fit:contain;
+}
+
+.boost-value{
+  color:var(--am);
+  font-weight:700;
+}
+
+pre{
+  position:fixed;
+  bottom:0;
+  left:0;
+  right:0;
+  margin:0;
+  background:#000d;
+  color:#9f9;
+  font-size:11px;
+  padding:6px 10px;
+}
+
+</style>
+</head>
+
+<body>
+
+<div id="app"></div>
+
+<audio
+  id="au"
+  preload="auto"
+  playsinline
+></audio>
+
+<script>
+
+const SYNCROOM_DEBUG_ENABLED = true;
+
+const $ = s => document.querySelector(s);
+
+const app = $('#app');
+
+const au = $('#au');
+
+const now = () =>
+  performance.timeOrigin +
+  performance.now();
+
+const fmt = t => {
+
+  t = Math.max(0, t | 0);
+
+  return (
+    String((t / 60) | 0).padStart(2,'0')
+    + ':'
+    +
+    String(t % 60).padStart(2,'0')
+  );
+};
+
+const DEBUG =
+  SYNCROOM_DEBUG_ENABLED &&
+  new URLSearchParams(location.search).has('debug');
+
+const I = {
+
+  play:
+    '<path d="M8 5v14l11-7z"/>',
+
+  pause:
+    '<path d="M6 5h4v14H6zm8 0h4v14h-4z"/>',
+
+  prev:
+    '<path d="M6 6h2v12H6zm3.5 6L18 18V6z"/>',
+
+  next:
+    '<path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/>'
+
+};
+
+const ic = n =>
+  `<svg viewBox="0 0 24 24">${I[n]}</svg>`;
+
+let ws;
+
+let view = 'home';
+
+let pending = null;
+
+let roomId = null;
+
+let token = null;
+
+let role = null;
+
+let snap = null;
+
+let songs = [];
+
+let err = '';
+
+let conn = 'connecting';
+
+let offset = 0;
+
+let rtt = 0;
+
+let samples = [];
+
+let audioOn = false;
+
+let loaded = null;
+
+let tgt = 0;
+
+let drift = 0;
+
+let synced = true;
+
+let lastSeek = 0;
+
+let dragging = false;
+
+let key = '';
+
+/*
+  Audio boost.
+
+  Browser volume remains 0..1.
+  GainNode allows controlled amplification.
+*/
+
+let audioContext = null;
+
+let gainNode = null;
+
+let boost = 1;
+
+function setupAudioBoost(){
+
+  if(audioContext) return;
+
+  try{
+
+    audioContext =
+      new (
+        window.AudioContext ||
+        window.webkitAudioContext
+      )();
+
+    const source =
+      audioContext.createMediaElementSource(au);
+
+    gainNode =
+      audioContext.createGain();
+
+    source.connect(gainNode);
+
+    gainNode.connect(
+      audioContext.destination
+    );
+
+    gainNode.gain.value = boost;
+
+  }catch(e){
+
+    console.warn(
+      'Audio boost unavailable:',
+      e
+    );
+
+  }
+
+}
+
+function setBoost(value){
+
+  boost = Number(value);
+
+  if(gainNode){
+
+    gainNode.gain.value = boost;
+
+  }
+
+  const label =
+    $('#boostValue');
+
+  if(label){
+
+    label.textContent =
+      boost.toFixed(1) + '×';
+
+  }
+
+}
+
+const srv = () =>
+  now() + offset;
+
+const tx = o =>
+  ws &&
+  ws.readyState === 1 &&
+  ws.send(JSON.stringify(o));
+
+const cmd = (type,x) =>
+  tx({
+    type,
+    ...(x || {})
+  });
+
+const jm =
+  location.pathname.match(
+    /^\/join\/([A-Za-z0-9]{6})/
+  );
+
+/*
+  Restore Commander after refresh.
+*/
+
+try{
+
+  const sv =
+    JSON.parse(
+      sessionStorage.sr || 'null'
+    );
+
+  if(!jm && sv){
+
+    roomId = sv.roomId;
+
+    token = sv.token;
+
+    role = 'commander';
+
+    view = 'room';
+
+    connect();
+
+  }
+
+}catch{}
+
+/*
+  QR join is now automatic.
+*/
+
+if(jm){
+
+  roomId =
+    jm[1].toUpperCase();
+
+  view = 'join';
+
+  /*
+    Immediately connect and join.
+  */
+  pending = {
+    type:'ROOM_JOIN',
+    roomId
+  };
+
+  connect();
+
+}
+
+fetch('/api/songs')
+  .then(r => r.json())
+  .then(s => {
+
+    songs = s;
+
+    draw();
+
+  });
+
+function connect(){
+
+  ws = new WebSocket(
+    (
+      location.protocol === 'https:'
+        ? 'wss://'
+        : 'ws://'
+    )
+    +
+    location.host
+    +
+    '/ws'
+  );
+
+  ws.onopen = () => {
+
+    conn = 'connected';
+
+    samples = [];
+
+    for(let i = 0; i < 8; i++){
+
+      setTimeout(
+        ping,
+        i * 150
+      );
+
+    }
+
+    if(pending){
+
+      tx(pending);
+
+      pending = null;
+
+    }else if(view === 'room'){
+
+      tx({
+        type:'ROOM_JOIN',
+        roomId,
+        token
+      });
+
+    }
+
+    draw();
+
+  };
+
+  ws.onmessage = e => {
+
+    onMsg(
+      JSON.parse(e.data)
+    );
+
+  };
+
+  ws.onclose = () => {
+
+    if(
+      view === 'room' ||
+      pending
+    ){
+
+      conn = 'reconnecting';
+
+      draw();
+
+      setTimeout(
+        connect,
+        1500
+      );
+
+    }
+
+  };
+
+}
+
+const ping = () =>
+  tx({
+    type:'TIME_PING',
+    t0:now()
+  });
+
+setInterval(() => {
+
+  if(conn === 'connected'){
+
+    ping();
+
+  }
+
+},5000);
+
+function onMsg(m){
+
+  switch(m.type){
+
+    case 'TIME_PONG':{
+
+      const t1 = now();
+
+      const r =
+        t1 - m.t0;
+
+      samples.push({
+        r,
+        o:
+          m.ts +
+          r / 2 -
+          t1
+      });
+
+      samples =
+        samples.slice(-10);
+
+      offset =
+        samples.reduce(
+          (a,c) =>
+            c.r < a.r ? c : a
+        ).o;
+
+      rtt = r;
+
+      break;
+    }
+
+    case 'ROOM_CREATED':{
+
+      roomId = m.roomId;
+
+      token = m.token;
+
+      role = 'commander';
+
+      sessionStorage.sr =
+        JSON.stringify({
+          roomId,
+          token
+        });
+
+      view = 'room';
+
+      draw();
+
+      break;
+    }
+
+    case 'JOINED':{
+
+      role = m.role;
+
+      view = 'room';
+
+      err = '';
+
+      draw();
+
+      /*
+        Ask for a fresh synchronization
+        immediately after joining.
+      */
+      tx({
+        type:'SYNC_REQUEST'
+      });
+
+      break;
+    }
+
+    case 'STATE_UPDATE':
+    case 'SYNC_RESPONSE':{
+
+      const s = m.state;
+
+      const k =
+        JSON.stringify([
+          s.songId,
+          s.state,
+          s.queue,
+          s.devices,
+          s.commanderOnline,
+          s.repeat,
+          s.position,
+          s.serverTime
+        ]);
+
+      snap = s;
+
+      if(k !== key){
+
+        key = k;
+
+        draw();
+
+      }
+
+      break;
+    }
+
+    case 'ERROR':{
+
+      err = m.message;
+
+      if(
+        view === 'room' &&
+        /not found/i.test(err)
+      ){
+
+        reset(err);
+
+      }
+
+      draw();
+
+      break;
+    }
+
+    case 'ROOM_ENDED':{
+
+      reset(
+        'The room was ended by the Commander.'
+      );
+
+      au.pause();
+
+      draw();
+
+      break;
+    }
+
+  }
+
+}
+
+function reset(msg=''){
+
+  sessionStorage.removeItem('sr');
+
+  snap = null;
+
+  role = null;
+
+  view = 'home';
+
+  err = msg;
+
+  key = '';
+
+  pending = null;
+
+}
+
+function unlock(){
+
+  setupAudioBoost();
+
+  if(
+    audioContext &&
+    audioContext.state === 'suspended'
+  ){
+
+    audioContext.resume();
+
+  }
+
+  /*
+    Tiny silent audio unlock.
+  */
+
+  au.src =
+    'data:audio/wav;base64,' +
+    'UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+
+  au.play().catch(()=>{});
+
+  audioOn = true;
+
+  loaded = null;
+
+  draw();
+
+}
+
+function startCommander(){
+
+  unlock();
+
+  pending = {
+    type:'ROOM_CREATE'
+  };
+
+  connect();
+
+}
+
+function joinRoom(){
+
+  pending = {
+    type:'ROOM_JOIN',
+    roomId
+  };
+
+  connect();
+
+}
+
+function goJoin(){
+
+  roomId =
+    $('#code')
+      .value
+      .trim()
+      .toUpperCase();
+
+  if(roomId.length === 6){
+
+    joinRoom();
+
+  }
+
+}
+
+const mv = (i,d) => {
+
+  const q =
+    [...snap.queue];
+
+  const j = i + d;
+
+  if(
+    j < 0 ||
+    j >= q.length
+  ) return;
+
+  [q[i],q[j]] =
+    [q[j],q[i]];
+
+  cmd(
+    'QUEUE_UPDATE',
+    {queue:q}
+  );
+
+};
+
+const rm = i => {
+
+  const q =
+    snap.queue.filter(
+      (_,j) => j !== i
+    );
+
+  if(q.length){
+
+    cmd(
+      'QUEUE_UPDATE',
+      {queue:q}
+    );
+
+  }
+
+};
+
+const endRoom = () => {
+
+  cmd('ROOM_END');
+
+  au.pause();
+
+  reset();
+
+  draw();
+
+};
+
+/*
+  Main synchronization loop.
+*/
+
+setInterval(() => {
+
+  if(!snap) return;
+
+  const s = snap;
+
+  const so = s.song;
+
+  const pl =
+    s.state === 'playing';
+
+  tgt = Math.min(
+    so.duration,
+    s.position +
+      (
+        pl
+          ? (srv() - s.serverTime) / 1000
+          : 0
+      )
+  );
+
+  if(audioOn){
+
+    if(loaded !== s.songId){
+
+      au.src = so.audio;
+
+      loaded = s.songId;
+
+      /*
+        Keep boost after changing tracks.
+      */
+      setBoost(boost);
+
+    }
+
+    if(pl){
+
+      if(au.paused){
+
+        au.play().catch(()=>{});
+
+      }
+
+      drift =
+        au.currentTime - tgt;
+
+      const a =
+        Math.abs(drift);
+
+      if(au.readyState < 3){
+
+        synced = false;
+
+      }
+
+      else if(a > .5){
+
+        if(
+          now() - lastSeek >
+          1500
+        ){
+
+          au.currentTime = tgt;
+
+          lastSeek = now();
+
+        }
+
+        synced = false;
+
+      }
+
+      else{
+
+        au.playbackRate =
+          a > .03
+            ? Math.max(
+                .95,
+                Math.min(
+                  1.05,
+                  1 - drift * .5
+                )
+              )
+            : 1;
+
+        synced =
+          a < .15;
+
+      }
+
+    }
+
+    else{
+
+      if(!au.paused){
+
+        au.pause();
+
+      }
+
+      au.playbackRate = 1;
+
+      if(
+        Math.abs(
+          au.currentTime - tgt
+        ) > .05
+      ){
+
+        au.currentTime = tgt;
+
+      }
+
+      drift = 0;
+
+      synced = true;
+
+    }
+
+  }
+
+  const c = $('#cur');
+
+  if(c){
+
+    c.textContent =
+      fmt(tgt);
+
+  }
+
+  const b = $('#bar');
+
+  if(
+    b &&
+    !dragging
+  ){
+
+    b.value = tgt;
+
+  }
+
+  const p = $('#pb');
+
+  if(p){
+
+    p.style.width =
+      100 * tgt / so.duration +
+      '%';
+
+  }
+
+  const st = $('#st');
+
+  if(st){
+
+    st.innerHTML =
+      status();
+
+  }
+
+  const d = $('#dbg');
+
+  if(d){
+
+    d.textContent = [
+      `server ${new Date(srv()).toISOString().slice(11,23)}   client ${new Date(now()).toISOString().slice(11,23)}`,
+      `offset ${offset.toFixed(1)}ms   ws latency ${rtt.toFixed(0)}ms`,
+      `position ${au.currentTime.toFixed(3)}s   target ${tgt.toFixed(3)}s`,
+      `drift ${(drift*1000).toFixed(0)}ms   rate ${au.playbackRate.toFixed(3)}`,
+      `gain ${boost.toFixed(1)}×`
+    ].join('\n');
+
+  }
+
+},250);
+
+function status(){
+
+  if(
+    conn !== 'connected'
+  ){
+
+    return '<span class="w">● Reconnecting...</span>';
+
+  }
+
+  if(!snap){
+
+    return '<span class="w">● Connecting...</span>';
+
+  }
+
+  if(!snap.commanderOnline){
+
+    return '<span class="w">● Commander disconnected. Waiting for Commander...</span>';
+
+  }
+
+  if(!audioOn){
+
+    return '<span class="w">● Tap once to enable synchronized audio</span>';
+
+  }
+
+  if(
+    snap.state !== 'playing'
+  ){
+
+    return '<span class="g">✓ Audio enabled · Waiting for Commander...</span>';
+
+  }
+
+  return synced
+    ? '<span class="g">● Synchronized</span>'
+    : '<span class="w">● Synchronizing...</span>';
+
+}
+
+function queue(s){
+
+  const by =
+    id =>
+      songs.find(
+        x => x.id === id
+      ) ||
+      {
+        title:id,
+        artist:'',
+        artwork:''
+      };
+
+  const row = (id,i) => {
+
+    const x = by(id);
+
+    return `
+      <div class="q">
+
+        <img
+          src="${x.artwork}"
+          alt=""
+        >
+
+        <span
+          onclick="cmd('PLAY',{songId:'${id}'})"
+        >
+
+          <b>
+            ${
+              id === s.songId
+                ? '▶ '
+                : ''
+            }${x.title}
+          </b>
+
+          <br>
+
+          <small class="lbl">
+            ${x.artist}
+          </small>
+
+        </span>
+
+        <button
+          onclick="mv(${i},-1)"
+        >
+          ↑
+        </button>
+
+        <button
+          onclick="mv(${i},1)"
+        >
+          ↓
+        </button>
+
+        <button
+          onclick="rm(${i})"
+        >
+          ✕
+        </button>
+
+      </div>
+    `;
+
+  };
+
+  const lib =
+    songs
+      .filter(
+        x =>
+          !s.queue.includes(x.id)
+      )
+      .map(
+        x => `
+          <div class="q">
+
+            <img
+              src="${x.artwork}"
+              alt=""
+            >
+
+            <span>
+              <b>${x.title}</b>
+              <br>
+              <small class="lbl">
+                ${x.artist}
+              </small>
+            </span>
+
+            <button
+              onclick="cmd('PLAY',{songId:'${x.id}'})"
+            >
+              Play
+            </button>
+
+          </div>
+        `
+      )
+      .join('');
+
+  return `
+    <section class="card">
+
+      <div class="lbl">
+        Queue
+      </div>
+
+      ${s.queue.map(row).join('')}
+
+      ${
+        lib
+          ? `
+            <div class="lbl">
+              Library
+            </div>
+
+            ${lib}
+          `
+          : ''
+      }
+
+    </section>
+  `;
+
+}
+
+function room(){
+
+  const s = snap;
+
+  const C =
+    role === 'commander';
+
+  let h = `
+    <header>
+
+      <b>
+        SYNC<i>ROOM</i>
+      </b>
+
+      <span class="tag">
+        ${
+          C
+            ? 'Commander Mode'
+            : 'Room ' + roomId
+        }
+      </span>
+
+    </header>
+  `;
+
+  if(!s){
+
+    return h +
+      '<p class="c">Connecting...</p>';
+
+  }
+
+  const so = s.song;
+
+  const pl =
+    s.state === 'playing';
+
+  /*
+    COMMANDER QR
+  */
+
+  if(C){
+
+    h += `
+
+      <section class="card">
+
+        <div class="lbl">
+          Scan to join
+        </div>
+
+        <div class="qr-box">
+
+          <img
+            id="qr"
+            alt="Scan to join SYNCROOM"
+          >
+
+        </div>
+
+        <div class="rid">
+          ${roomId}
+        </div>
+
+        <p class="lbl">
+          Scan this QR with another phone
+        </p>
+
+        <p>
+          <b>
+            ${s.devices}
+            device${s.devices === 1 ? '' : 's'}
+            connected
+          </b>
+        </p>
+
+      </section>
+
+    `;
+
+  }
+
+  /*
+    Participant unlock.
+  */
+
+  if(!audioOn){
+
+    h += `
+
+      <section class="card">
+
+        <h2>
+          You're ready!
+        </h2>
+
+        <button
+          class="pri"
+          onclick="unlock()"
+        >
+          🔊 Enable synchronized audio
+        </button>
+
+      </section>
+
+    `;
+
+  }
+
+  h += `
+
+    <div
+      id="st"
+      class="st"
+    >
+      ${status()}
+    </div>
+
+    <img
+      class="art ${pl ? 'on' : ''}"
+      src="${so.artwork}"
+      alt="Album artwork"
+    >
+
+    <h1>
+      ${so.title}
+    </h1>
+
+    <p class="c">
+      ${so.artist} · ${so.album}
+    </p>
+
+  `;
+
+  if(C){
+
+    h += `
+
+      <input
+        type="range"
+        id="bar"
+        min="0"
+        max="${so.duration}"
+        step="0.1"
+        value="${tgt}"
+        aria-label="Seek"
+
+        onpointerdown="
+          dragging=true
+        "
+
+        onchange="
+          dragging=false;
+          cmd('SEEK',{
+            position:+this.value
+          })
+        "
+      >
+
+    `;
+
+  }else{
+
+    h += `
+
+      <div class="bar">
+
+        <div id="pb"></div>
+
+      </div>
+
+    `;
+
+  }
+
+  h += `
+
+    <div class="t">
+
+      <span id="cur">
+        00:00
+      </span>
+
+      <span>
+        ${fmt(so.duration)}
+      </span>
+
+    </div>
+
+  `;
+
+  if(C){
+
+    h += `
+
+      <div class="row">
+
+        <button
+          onclick="cmd('SHUFFLE')"
+        >
+          Shuffle
+        </button>
+
+        <button
+          onclick="cmd('PREVIOUS')"
+        >
+          ${ic('prev')}
+        </button>
+
+        <button
+          class="pri big"
+          onclick="
+            cmd('${pl ? 'PAUSE' : 'PLAY'}')
+          "
+        >
+          ${ic(pl ? 'pause' : 'play')}
+        </button>
+
+        <button
+          onclick="cmd('NEXT')"
+        >
+          ${ic('next')}
+        </button>
+
+        <button
+          onclick="
+            cmd(
+              'SET_REPEAT',
+              {
+                mode:
+                  '${{
+                    off:'all',
+                    all:'one',
+                    one:'off'
+                  }[s.repeat]}'
+              }
+            )
+          "
+        >
+          Repeat: ${s.repeat}
+        </button>
+
+      </div>
+
+      <section class="card">
+
+        <div class="lbl">
+          Device volume
+        </div>
+
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          value="${au.volume}"
+          oninput="
+            au.volume=+this.value
+          "
+        >
+
+        <div class="lbl">
+          Audio Boost
+        </div>
+
+        <input
+          type="range"
+          min="1"
+          max="2.5"
+          step="0.1"
+          value="${boost}"
+          oninput="
+            setBoost(this.value)
+          "
+        >
+
+        <div>
+          Boost:
+          <span
+            id="boostValue"
+            class="boost-value"
+          >
+            ${boost.toFixed(1)}×
+          </span>
+        </div>
+
+      </section>
+
+      ${queue(s)}
+
+      <button
+        class="end"
+        onclick="
+          if(confirm(
+            'End the room for everyone?'
+          )) endRoom()
+        "
+      >
+        End room
+      </button>
+
+    `;
+
+  }else{
+
+    h += `
+
+      <p class="c">
+
+        <button
+          onclick="
+            cmd('ROOM_LEAVE');
+            reset();
+            draw()
+          "
+        >
+          Leave room
+        </button>
+
+      </p>
+
+    `;
+
+  }
+
+  return h +
+    (
+      DEBUG
+        ? '<pre id="dbg"></pre>'
+        : ''
+    );
+
+}
+
+function draw(){
+
+  const H = `
+    <header>
+      <b>
+        SYNC<i>ROOM</i>
+      </b>
+    </header>
+  `;
+
+  const E =
+    err
+      ? `<p class="w">${err}</p>`
+      : '';
+
+  if(view === 'home'){
+
+    app.innerHTML = `
+
+      ${H}
+
+      <section class="card">
+
+        <h2>
+          Play one song on every phone
+        </h2>
+
+        ${E}
+
+        <button
+          class="pri"
+          onclick="startCommander()"
+        >
+          Create room as Commander
+        </button>
+
+      </section>
+
+      <section class="card">
+
+        <div class="lbl">
+          Have a room code?
+        </div>
+
+        <div class="row">
+
+          <input
+            id="code"
+            maxlength="6"
+            placeholder="X7K92P"
+          >
+
+          <button
+            onclick="goJoin()"
+          >
+            Join
+          </button>
+
+        </div>
+
+      </section>
+
+    `;
+
+  }
+
+  else if(view === 'join'){
+
+    /*
+      No manual JOIN button anymore.
+      QR URL automatically connects.
+    */
+
+    app.innerHTML = `
+
+      ${H}
+
+      <section class="card">
+
+        <h2>
+          Joining SYNCROOM...
+        </h2>
+
+        <div class="lbl">
+          Room
+        </div>
+
+        <div class="rid">
+          ${roomId}
+        </div>
+
+        ${E}
+
+        <p class="lbl">
+          Connecting automatically...
+        </p>
+
+      </section>
+
+    `;
+
+  }
+
+  else{
+
+    app.innerHTML =
+      room();
+
+  }
+
+  /*
+    Load QR image after DOM exists.
+  */
+
+  if(
+    view === 'room' &&
+    role === 'commander' &&
+    $('#qr')
+  ){
+
+    fetch(
+      '/api/qr/' +
+      encodeURIComponent(roomId)
+    )
+    .then(r => {
+
+      if(!r.ok){
+
+        throw new Error(
+          'QR request failed'
+        );
+
+      }
+
+      return r.json();
+
+    })
+    .then(data => {
+
+      const qr = $('#qr');
+
+      if(qr){
+
+        qr.src = data.dataUrl;
+
+      }
+
+    })
+    .catch(e => {
+
+      console.error(
+        'QR error:',
+        e
+      );
+
+    });
+
+  }
+
+}
+
+draw();
+
+</script>
+
+</body>
+</html>
