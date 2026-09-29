@@ -62,7 +62,35 @@ input#ytUrl{width:100%;min-width:0;min-height:48px;border-radius:14px;border:1px
 .qr-box img{width:100%;height:100%;object-fit:contain}
 .room-code-display{font:800 32px ui-monospace,monospace;letter-spacing:.18em;margin:6px 0}
 .boost-value{color:var(--am);font-weight:700}
-.bar{height:6px;background:#ffffff1f;border-radius:9px;overflow:hidden;margin:18px 0 0}
+.yt-loading{
+  margin:12px 0 18px;
+  padding:12px 14px;
+  background:#ffffff0d;
+  border:1px solid #ffffff16;
+  border-radius:14px;
+}
+.yt-loading-title{
+  display:flex;
+  justify-content:space-between;
+  font-size:13px;
+  color:var(--mu);
+  margin-bottom:8px;
+}
+.yt-loading-title b{
+  color:var(--ac);
+}
+.yt-loading-bar{
+  height:7px;
+  background:#ffffff1f;
+  border-radius:10px;
+  overflow:hidden;
+}
+.yt-loading-bar>div{
+  height:100%;
+  background:var(--ac);
+  border-radius:10px;
+  transition:width .2s linear;
+}
 .bar>div{height:100%;width:0;background:var(--ac);transition:width .2s linear}
 .t{display:flex;justify-content:space-between;color:var(--mu);font-size:14px;font-variant-numeric:tabular-nums;margin-top:6px}
 .end{width:100%;margin-top:14px;background:#ff4d8d22;border:1px solid #ff4d8d44}
@@ -95,7 +123,8 @@ const UH={'X-Uid':uid};
 
 let ws=null,view='home',pending=null,roomId=null,token=null,role=null,snap=null,songs=[],err='',conn='connecting',
 offset=0,rtt=0,samples=[],audioOn=false,loaded=null,tgt=0,drift=0,synced=true,lastSeek=0,dragging=false,key='',
-boost=1,uploadBusy=false,uploadStatus='',lastDur=0,errT=null,qmap={},yl=[],qv=null,lastReq=0,lastStatus='',preId=null;
+boost=1,uploadBusy=false,uploadStatus='',lastDur=0,errT=null,qmap={},yl=[],qv=null,lastReq=0,lastStatus='',preId=null,
+ytLoading=false,ytProgress=0,ytSongId=null;
 
 let audioContext=null,gainNode=null;
 function setupAudioBoost(){
@@ -125,7 +154,45 @@ function preload(){
 }
 
 au.onended=()=>{if(role==='commander'&&loaded)cmd('ENDED',{id:loaded})};
+au.addEventListener('progress',()=>{
+  if(!ytLoading||!au.duration)return;
 
+  try{
+    const end=au.buffered.length
+      ?au.buffered.end(au.buffered.length-1)
+      :0;
+
+    ytProgress=Math.min(100,Math.round((end/au.duration)*100));
+
+    if(ytProgress>=100){
+      ytLoading=false;
+    }
+
+    draw();
+  }catch{}
+});
+
+au.addEventListener('canplay',()=>{
+  if(ytLoading){
+    ytProgress=Math.max(ytProgress,90);
+    draw();
+  }
+});
+
+au.addEventListener('playing',()=>{
+  if(ytLoading){
+    ytProgress=100;
+    ytLoading=false;
+    draw();
+  }
+});
+au.addEventListener('error',()=>{
+  if(ytLoading){
+    ytLoading=false;
+    ytProgress=0;
+    flash('YouTube audio could not be played. Please try again.');
+  }
+});
 const tx=o=>{if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(o))};
 const cmd=(type,data={})=>tx({type,...data});
 
@@ -192,7 +259,11 @@ const chooseFiles=()=>pick(false),chooseFolder=()=>pick(true);
 
 const jm=location.pathname.match(/^\/join\/([A-Za-z0-9]{6})/);
 try{
-  const saved=JSON.parse(sessionStorage.sr||'null');
+  const saved =
+  JSON.parse(
+    localStorage.sr ||
+    'null'
+  );
   if(!jm&&saved){roomId=saved.roomId;token=saved.token;role='commander';view='room';connect()}
 }catch{}
 if(jm){roomId=jm[1].toUpperCase();view='join';pending={type:'ROOM_JOIN',roomId};connect()}
@@ -242,7 +313,7 @@ function onMsg(m){
     }
     case 'ROOM_CREATED':
       roomId=m.roomId;token=m.token;role='commander';
-      sessionStorage.sr=JSON.stringify({roomId,token});
+      localStorage.sr=JSON.stringify({roomId,token});
       view='room';err='';draw();
       break;
     case 'JOINED':
@@ -273,7 +344,7 @@ function onMsg(m){
 }
 
 function reset(msg=''){
-  sessionStorage.removeItem('sr');
+
   snap=null;role=null;view='home';err=msg;key='';pending=null;roomId=null;token=null;
   qmap={};yl=[];qv=null;loaded=null;tgt=0;preId=null;
   try{history.replaceState(null,'','/')}catch{}
@@ -311,7 +382,12 @@ function exitRoom(msgType){
   conn='connecting';samples=[];offset=0;rtt=0;drift=0;synced=true;lastSeek=0;
   draw();
 }
-const endRoom=()=>exitRoom('ROOM_END'),leaveRoom=()=>exitRoom('ROOM_LEAVE');
+const endRoom=()=>{
+  localStorage.removeItem('sr');
+  exitRoom('ROOM_END');
+};
+
+const leaveRoom=()=>exitRoom('ROOM_LEAVE');
 
 function mv(i,d){
   if(!snap||!Array.isArray(snap.queue))return;
@@ -345,9 +421,20 @@ function prepareYT(){
 function addYT(play){
   const i=$('#ytUrl'),u=i?i.value.trim():'';
   if(!u)return;
+
   unlock();
+
+  if(play){
+  ytLoading=true;
+  ytProgress=0;
+  ytSongId=null;
+  draw();
+}
+
   cmd('YOUTUBE_ADD',{url:u,play});
-  const n=$('#ytUrl');if(n)n.value='';
+
+  const n=$('#ytUrl');
+  if(n)n.value='';
 }
 
 function tick(){
@@ -523,7 +610,14 @@ function room(){
   }
 
   if(song){
-    h+=`<div id="st" class="st">${status()}</div>
+    h+=`${ytLoading?`
+      <div class="yt-loading">
+        <div class="yt-loading-title">Loading YouTube audio... <b>${ytProgress}%</b></div>
+        <div class="yt-loading-bar">
+          <div style="width:${ytProgress}%"></div>
+        </div>
+      </div>`:''}
+      <div id="st" class="st">${status()}</div>
       <div class="art-container ${playing?'playing':''}">
         <span class="art-badge">🎵 ${isYT(song)?'YouTube':'Local'}</span>
         <img class="art" src="${esc(thumb(song))}" alt="${esc(song.title||'')}" ${FALLBACK}>

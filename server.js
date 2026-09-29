@@ -1,11 +1,12 @@
 const express=require('express'),http=require('http'),{WebSocketServer}=require('ws'),crypto=require('crypto'),fs=require('fs'),path=require('path'),os=require('os'),QRCode=require('qrcode'),{execFile}=require('child_process');
+const {Readable}=require('stream');
 const D=__dirname,PORT=process.env.PORT||3000,MUSIC=process.env.MUSIC_DIR||path.join(D,'music'),UP=path.join(MUSIC,'uploads'),CACHE=path.join(MUSIC,'ytcache');
 if (fs.existsSync('/etc/secrets/cookies.txt')) {
   fs.copyFileSync('/etc/secrets/cookies.txt', '/tmp/cookies.txt');
 }
 const UPDB=path.join(MUSIC,'uploads.json'),LIBDB=path.join(MUSIC,'library.json'),YTDB=path.join(MUSIC,'ytcache.json');
 const YTDLP=process.env.YTDLP||'yt-dlp';
-const MAX_UPLOAD=250*1024*1024,MAX_DL=3,CACHE_DAYS=3,CACHE_MAX=300,MAX_QUEUE=200,MAX_MEMBERS=1000;
+const MAX_UPLOAD=250*1024*1024,MAX_DL=3,CACHE_DAYS=3,CACHE_MAX=300,MAX_QUEUE=200,ROOM_LIFETIME=9*60*60*1000,MAX_MEMBERS=1000;
 fs.mkdirSync(UP,{recursive:true});fs.mkdirSync(CACHE,{recursive:true});
 
 process.on('uncaughtException',e=>console.error('UNCAUGHT:',e));
@@ -18,6 +19,14 @@ const write=(f,v)=>fs.writeFile(f,JSON.stringify(v,null,2),e=>{if(e)console.erro
 const baseSongs=readJSON(LIBDB,[]);
 let uploaded=readJSON(UPDB,[]);
 const ytc=new Map(readJSON(YTDB,[]).map(s=>[s.id,s]));
+const ytStreams=new Map();
+
+setInterval(()=>{
+  const now=Date.now();
+  for(const [id,s] of ytStreams){
+    if(s.expires&&s.expires<now)ytStreams.delete(id);
+  }
+},10*60e3);
 const saveUploads=debounce(()=>write(UPDB,uploaded),300);
 const saveLibrary=debounce(()=>write(LIBDB,baseSongs),300);
 const saveYT=debounce(()=>write(YTDB,[...ytc.values()]),300);
@@ -55,6 +64,92 @@ function persistDuration(song,duration){
 const app=express();
 app.disable('x-powered-by');
 app.use('/music',(req,res,next)=>/\.json$/i.test(req.path)?res.sendStatus(404):next());
+app.get('/api/ytstream/:id',async(req,res)=>{
+  const id=String(req.params.id||'');
+  const s=ytStreams.get(id);
+
+  if(!s)return res.sendStatus(404);
+
+  try{
+    const headers={...(s.headers||{})};
+
+    if(req.headers.range)headers.Range=req.headers.range;
+
+    const upstream=await fetch(s.url,{
+      headers,
+      redirect:'follow'
+    });
+
+    if(!upstream.ok||!upstream.body){
+
+  if(upstream.status===403){
+    ytStreams.delete(id);
+
+    try{
+      await fetchYT(id.startsWith('yt_')?id.slice(3):id,'high');
+
+      const retry=ytStreams.get(id);
+
+      if(retry){
+        const retryHeaders={...(retry.headers||{})};
+
+        if(req.headers.range){
+          retryHeaders.Range=req.headers.range;
+        }
+
+        const retryUpstream=await fetch(retry.url,{
+          headers:retryHeaders,
+          redirect:'follow'
+        });
+
+        if(retryUpstream.ok&&retryUpstream.body){
+          res.status(retryUpstream.status);
+
+          for(const h of [
+            'content-type',
+            'content-length',
+            'content-range',
+            'accept-ranges',
+            'cache-control'
+          ]){
+            const v=retryUpstream.headers.get(h);
+            if(v)res.setHeader(h,v);
+          }
+
+          res.setHeader('Access-Control-Allow-Origin','*');
+
+          return Readable.fromWeb(retryUpstream.body).pipe(res);
+        }
+      }
+    }catch(e){
+      console.error('YT STREAM RETRY ERROR:',e.message||e);
+    }
+  }
+
+  return res.status(502).send('YouTube stream unavailable.');
+}
+
+    res.status(upstream.status);
+
+    for(const h of [
+      'content-type',
+      'content-length',
+      'content-range',
+      'accept-ranges',
+      'cache-control'
+    ]){
+      const v=upstream.headers.get(h);
+      if(v)res.setHeader(h,v);
+    }
+
+    res.setHeader('Access-Control-Allow-Origin','*');
+
+    Readable.fromWeb(upstream.body).pipe(res);
+  }catch(e){
+    console.error('YT STREAM ERROR:',e.message||e);
+    if(!res.headersSent)res.status(502).send('YouTube stream failed.');
+  }
+});
 app.use('/music',express.static(MUSIC,{maxAge:'7d',index:false}));
 app.use('/vendor',express.static(path.join(D,'node_modules/qrcode/build'),{maxAge:'7d'}));
 app.use(express.static(path.join(D,'public'),{maxAge:0}));
@@ -187,37 +282,93 @@ const free=()=>{
   if(job)job.go();
 };
 function fetchYT(vid,priority='normal'){
-  const id='yt_'+vid,c=ytc.get(id);
-  if(c&&fs.existsSync(path.join(CACHE,path.basename(c.audio)))){c.used=Date.now();saveYT();return Promise.resolve(c)}
+  const id='yt_'+vid;
+
   if(dl.has(vid))return dl.get(vid);
+
+  const cached=ytc.get(id);
+  if(cached&&ytStreams.has(id)){
+    cached.used=Date.now();
+    saveYT();
+    return Promise.resolve(cached);
+  }
+
   const p=(async()=>{
-    await slot(priority);
-    try{
-      const out=await new Promise((ok,bad)=>execFile(YTDLP,[
-        '--no-playlist','--max-filesize', '200M','--js-runtimes', 'node','--cookies', '/tmp/cookies.txt','-f', '140/bestaudio[ext=m4a]/bestaudio',
-        '-f','140/bestaudio[ext=m4a]/bestaudio','--print-json','-o',path.join(CACHE,id+'.%(ext)s'),
-        'https://www.youtube.com/watch?v='+vid
-      ],{maxBuffer:1<<26,timeout:8*60e3},(e,so)=>e?bad(e):ok(String(so))));
-      const line=out.trim().split('\n').filter(l=>l.startsWith('{')).pop();
-      const j=JSON.parse(line),ext=j.ext||'m4a';
-      if(!fs.existsSync(path.join(CACHE,id+'.'+ext)))throw new Error('file missing');
-      const song={
-        id,type:'local',title:j.title||'YouTube Audio',artist:j.uploader||j.channel||'YouTube',album:'YouTube',
-        artwork:`https://i.ytimg.com/vi/${vid}/hqdefault.jpg`,audio:`/music/ytcache/${id}.${ext}`,
-        duration:Number(j.duration)||0,used:Date.now()
-      };
-      ytc.set(id,song);catalog.set(id,song);saveYT();
-      return song;
-    }finally{free()}
+  await slot(priority);
+
+  try{
+    const args=[
+      '--no-playlist',
+      '--no-warnings',
+      '--no-progress',
+      '--js-runtimes','node',
+      '-f','140/bestaudio[ext=m4a]/bestaudio',
+      '-J',
+      'https://www.youtube.com/watch?v='+vid
+    ];
+
+    if(fs.existsSync('/tmp/cookies.txt')){
+      args.splice(7,0,'--cookies','/tmp/cookies.txt');
+    }
+
+    const out=await new Promise((ok,bad)=>
+      execFile(
+        YTDLP,
+        args,
+        {maxBuffer:1<<26,timeout:60e3},
+        (e,so,se)=>e?bad(Object.assign(e,{stderr:String(se||'')})):ok(String(so))
+      )
+    );
+
+    const lines=out.trim().split('\n').filter(Boolean);
+    const j=JSON.parse(lines[lines.length-1]);
+
+    const playableUrl=j.url||(
+  Array.isArray(j.formats)
+    ?j.formats.find(f=>f.url&&(
+        f.format_id==='140' ||
+        f.ext==='m4a' ||
+        String(f.mime_type||'').startsWith('audio/')
+      ))?.url
+    :null
+);
+
+if(!playableUrl)throw new Error('No playable YouTube URL found.');
+
+    ytStreams.set(id,{
+      url:playableUrl,
+      headers:j.http_headers||{},
+      expires:Date.now()+2*60*60*1000
+    });
+
+    const song={
+      id,
+      type:'local',
+      title:j.title||'YouTube Audio',
+      artist:j.uploader||j.channel||'YouTube',
+      album:'YouTube',
+      artwork:`https://i.ytimg.com/vi/${vid}/hqdefault.jpg`,
+      audio:`/api/ytstream/${id}`,
+      duration:Number(j.duration)||0,
+      used:Date.now()
+    };
+
+    ytc.set(id,song);
+    catalog.set(id,song);
+    saveYT();
+
+    return song;
+        }finally{
+      free();
+    }
   })().finally(()=>dl.delete(vid));
+
   dl.set(vid,p);
   return p;
 }
 
 async function ytRoom(r,vid,play){
   const id='yt_'+vid;
-  if(r.pend>=3)return notice(r,'Too many downloads at once. Please wait a moment.');
-  if(!ytc.has(id))notice(r,'Downloading song, please wait...');
   r.pend++;
   try{
     const song=await fetchYT(vid,play?'high':'normal');
@@ -226,7 +377,7 @@ async function ytRoom(r,vid,play){
     addQ(r,id);
     if(play)setSong(r,id,true);
     else if(!r.s.songId)setSong(r,id,false);
-    notice(r,play?'Playing now.':'Added to queue.');
+    notice(r,play?'Starting playback...':'Added to queue.');
   }catch(e){
     console.error('YT-DLP ERROR:',e.message||e);
     if(rooms.has(r.id))notice(r,e.code==='ENOENT'?'yt-dlp is not installed on the server PC.':'Could not download this video. Check the link and try again.');
@@ -321,7 +472,16 @@ wss.on('connection',ws=>{
       uploaded.forEach(s=>{if(!s.owner){s.owner=uid;claimed=true}});
       if(claimed)saveUploads();
       const r={
-        id:newId(),token:crypto.randomBytes(24).toString('hex'),owner:uid,cmd:ws,members:new Set([ws]),
+        token:
+  crypto
+    .randomBytes(24)
+    .toString('hex'),
+
+expiresAt:
+  Date.now()+ROOM_LIFETIME,
+
+cmd:
+  ws,
         queue:[],yt:new Map(),repeat:'off',tick:0,seen:Date.now(),qv:0,sentQv:0,pend:0,bt:null,
         s:{songId:null,state:'paused',position:0,ts:Date.now()}
       };
@@ -453,8 +613,7 @@ wss.on('connection',ws=>{
 setInterval(()=>{
   const t=Date.now();
   rooms.forEach(r=>{
-    if(r.cmd)r.seen=t;
-    else if(t-r.seen>30*60e3)return endRoom(r);
+    if(r.expiresAt&&t>=r.expiresAt)return endRoom(r);
     const song=r.s.songId&&catalog.get(r.s.songId);
     if(song&&song.duration>0&&r.s.state==='playing'&&pos(r)>=song.duration){
       if(r.repeat==='one')setSong(r,r.s.songId,true);else step(r,1);
