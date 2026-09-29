@@ -1,5 +1,8 @@
 const express=require('express'),http=require('http'),{WebSocketServer}=require('ws'),crypto=require('crypto'),fs=require('fs'),path=require('path'),os=require('os'),QRCode=require('qrcode'),{execFile}=require('child_process');
 const D=__dirname,PORT=process.env.PORT||3000,MUSIC=process.env.MUSIC_DIR||path.join(D,'music'),UP=path.join(MUSIC,'uploads'),CACHE=path.join(MUSIC,'ytcache');
+if (fs.existsSync('/etc/secrets/cookies.txt')) {
+  fs.copyFileSync('/etc/secrets/cookies.txt', '/tmp/cookies.txt');
+}
 const UPDB=path.join(MUSIC,'uploads.json'),LIBDB=path.join(MUSIC,'library.json'),YTDB=path.join(MUSIC,'ytcache.json');
 const YTDLP=process.env.YTDLP||'yt-dlp';
 const MAX_UPLOAD=250*1024*1024,MAX_DL=3,CACHE_DAYS=3,CACHE_MAX=300,MAX_QUEUE=200,MAX_MEMBERS=1000;
@@ -165,7 +168,7 @@ function fetchYT(vid){
     await slot();
     try{
       const out=await new Promise((ok,bad)=>execFile(YTDLP,[
-        '--no-playlist','--max-filesize', '200M','--js-runtimes', 'node','--cookies', '/etc/secrets/cookies.txt','-f', '140/bestaudio[ext=m4a]/bestaudio',
+        '--no-playlist','--max-filesize', '200M','--js-runtimes', 'node','--cookies', '/tmp/cookies.txt','-f', '140/bestaudio[ext=m4a]/bestaudio',
         '-f','140/bestaudio[ext=m4a]/bestaudio','--print-json','-o',path.join(CACHE,id+'.%(ext)s'),
         'https://www.youtube.com/watch?v='+vid
       ],{maxBuffer:1<<26,timeout:8*60e3},(e,so)=>e?bad(e):ok(String(so))));
