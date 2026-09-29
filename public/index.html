@@ -124,7 +124,7 @@ const UH={'X-Uid':uid};
 let ws=null,view='home',pending=null,roomId=null,token=null,role=null,snap=null,songs=[],err='',conn='connecting',
 offset=0,rtt=0,samples=[],audioOn=false,loaded=null,tgt=0,drift=0,synced=true,lastSeek=0,dragging=false,key='',
 boost=1,uploadBusy=false,uploadStatus='',lastDur=0,errT=null,qmap={},yl=[],qv=null,lastReq=0,lastStatus='',preId=null,
-ytLoading=false,ytProgress=0,ytSongId=null;
+ytLoading=false,ytProgress=0,ytSongId=null,roomConnectTimer=null;
 
 let audioContext=null,gainNode=null;
 function setupAudioBoost(){
@@ -258,16 +258,57 @@ function pick(folder){
 const chooseFiles=()=>pick(false),chooseFolder=()=>pick(true);
 
 const jm=location.pathname.match(/^\/join\/([A-Za-z0-9]{6})/);
-try{
-  const saved =
-  JSON.parse(
-    localStorage.sr ||
-    'null'
-  );
-  if(!jm&&saved){roomId=saved.roomId;token=saved.token;role='commander';view='room';connect()}
-}catch{}
+
 if(jm){roomId=jm[1].toUpperCase();view='join';pending={type:'ROOM_JOIN',roomId};connect()}
 else loadSongs();
+function getRoomHistory(){
+  try{
+    return JSON.parse(localStorage.getItem('srHistory') || '[]');
+  }catch{
+    return [];
+  }
+}
+
+function saveRoomHistory(roomId,token){
+  const history=getRoomHistory().filter(x=>x.roomId!==roomId);
+
+  history.unshift({
+    roomId,
+    token,
+    time:Date.now()
+  });
+
+  localStorage.setItem(
+    'srHistory',
+    JSON.stringify(history.slice(0,10))
+  );
+}
+
+function openHistoryRoom(roomId){
+  const item=getRoomHistory().find(x=>x.roomId===roomId);
+
+  if(!item)return;
+
+  if(!item.token){
+    flash('This room history entry is from an older version. Create a new room.');
+    return;
+  }
+
+  roomId=item.roomId;
+  token=item.token;
+  role='commander';
+  view='room';
+  pending=null;
+  err='';
+  conn='connecting';
+  connect();
+}
+
+function removeHistoryRoom(roomId){
+  const history=getRoomHistory().filter(x=>x.roomId!==roomId);
+  localStorage.setItem('srHistory',JSON.stringify(history));
+  draw();
+}
 
 function connect(){
   if(ws&&ws.readyState===WebSocket.OPEN){
@@ -281,9 +322,23 @@ function connect(){
 
   ws.onopen=()=>{
     conn='connected';samples=[];
+    clearTimeout(roomConnectTimer);
     for(let i=0;i<6;i++)setTimeout(ping,i*150);
     if(pending){const m=pending;pending=null;tx(m)}
     else if(view==='room'&&roomId)tx({type:'ROOM_JOIN',roomId,token});
+
+    clearTimeout(roomConnectTimer);
+    if(view==='room'){
+      roomConnectTimer=setTimeout(()=>{
+        if(view==='room'&&!snap){
+          if(ws){try{ws.onclose=null;ws.close()}catch{}ws=null}
+          reset('Could not connect to this room. You are back on Home.');
+          conn='connecting';
+          draw();
+        }
+      },10000);
+    }
+
     draw();
   };
   ws.onmessage=e=>{try{onMsg(JSON.parse(e.data))}catch(x){console.warn('onMsg error:',x)}};
@@ -312,17 +367,34 @@ function onMsg(m){
       break;
     }
     case 'ROOM_CREATED':
-      roomId=m.roomId;token=m.token;role='commander';
-      localStorage.sr=JSON.stringify({roomId,token});
-      view='room';err='';draw();
-      break;
+  roomId=m.roomId;
+  token=m.token;
+  role='commander';
+
+  localStorage.sr=JSON.stringify({
+    roomId,
+    token
+  });
+
+  saveRoomHistory(roomId,token);
+  clearTimeout(roomConnectTimer);
+  roomConnectTimer=null;
+
+  view='room';
+  err='';
+  draw();
+  break;
     case 'JOINED':
+      clearTimeout(roomConnectTimer);
+      roomConnectTimer=null;
       role=m.role;view='room';err='';draw();
       break;
     case 'STATE_UPDATE':
     case 'SYNC_RESPONSE':{
       const st=m.state,oldSong=snap?.songId,oldState=snap?.state;
       snap=st;
+      clearTimeout(roomConnectTimer);
+      roomConnectTimer=null;
       if(st.qs){qmap={};st.qs.forEach(s=>{qmap[s.id]=s});yl=st.yl||[];qv=st.qv}
       else if(st.qv!==qv&&now()-lastReq>1000){lastReq=now();tx({type:'SYNC_REQUEST'})}
       const k=[snap.songId,snap.state,snap.repeat,role==='commander'?snap.devices:0,snap.commanderOnline,snap.song?.duration,qv].join('|');
@@ -336,6 +408,7 @@ function onMsg(m){
       break;
     case 'NOTICE':flash(m.message);break;
     case 'ROOM_ENDED':
+      localStorage.removeItem('sr');
       reset('The room was ended by the Commander.');
       au.pause();
       draw();
@@ -344,6 +417,8 @@ function onMsg(m){
 }
 
 function reset(msg=''){
+  clearTimeout(roomConnectTimer);
+  roomConnectTimer=null;
 
   snap=null;role=null;view='home';err=msg;key='';pending=null;roomId=null;token=null;
   qmap={};yl=[];qv=null;loaded=null;tgt=0;preId=null;
@@ -656,19 +731,98 @@ function room(){
 function draw(){
   lastStatus='';
   if(view==='home'){
-    app.innerHTML=HEADER('')+`
-      <section class="card">
-        <h2>Play one song on every phone</h2>
-        <p class="lbl">One Commander controls the room; every phone plays in perfect sync.</p>
-        ${err?`<p class="w">${esc(err)}</p>`:''}
-        <button class="pri" style="margin-top:10px;width:100%;font-size:16px" onclick="startCommander()">Create Room as Commander</button>
-      </section>
-      <section class="card">
-        <div class="lbl">Have a 6-letter room code?</div>
-        <div class="row"><input id="code" maxlength="6" placeholder="X7K92P"><button onclick="goJoin()">Join</button></div>
-      </section>`;
-    return;
-  }
+  const history=getRoomHistory();
+
+  app.innerHTML=HEADER('')+`
+    <section class="card">
+      <h2>Play one song on every phone</h2>
+
+      <p class="lbl">
+        One Commander controls the room; every phone plays in perfect sync.
+      </p>
+
+      ${err?`<p class="w">${esc(err)}</p>`:''}
+
+      <button
+        class="pri"
+        style="margin-top:10px;width:100%;font-size:16px"
+        onclick="startCommander()"
+      >
+        Create Room as Commander
+      </button>
+    </section>
+
+    <section class="card">
+      <div class="lbl">Have a 6-letter room code?</div>
+
+      <div class="row">
+        <input
+          id="code"
+          maxlength="6"
+          placeholder="X7K92P"
+        >
+
+        <button onclick="goJoin()">Join</button>
+      </div>
+    </section>
+
+    ${
+      history.length
+      ? `
+        <section class="card">
+          <h2>Room History</h2>
+
+          <div style="display:grid;gap:8px">
+            ${
+              history.map(x=>`
+                <div
+                  style="
+                    display:flex;
+                    align-items:center;
+                    gap:8px;
+                    padding:10px;
+                    background:#ffffff0b;
+                    border:1px solid #ffffff12;
+                    border-radius:14px;
+                  "
+                >
+                  <div style="flex:1;text-align:left">
+                    <b style="font-family:ui-monospace,monospace">
+                      ${esc(x.roomId)}
+                    </b>
+
+                    <div class="lbl">
+                      ${new Date(x.time).toLocaleString()}
+                    </div>
+                  </div>
+
+                  <button
+                    class="small"
+                    onclick="openHistoryRoom('${esc(x.roomId)}')"
+                    title="Open room"
+                  >
+                    ▶
+                  </button>
+
+                  <button
+                    class="small"
+                    onclick="removeHistoryRoom('${esc(x.roomId)}')"
+                    title="Remove from history"
+                  >
+                    ✕
+                  </button>
+                </div>
+              `).join('')
+            }
+          </div>
+        </section>
+      `
+      : ''
+    }
+  `;
+
+  return;
+}
   if(view==='join'){
     app.innerHTML=HEADER('')+`<section class="card">
       <h2>Joining SYNCROOM...</h2>
