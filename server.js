@@ -482,7 +482,7 @@ expiresAt:
 
 cmd:
   ws,
-        queue:[],yt:new Map(),repeat:'off',tick:0,seen:Date.now(),qv:0,sentQv:0,pend:0,bt:null,
+        queue:[],yt:new Map(),members:new Set([ws]),repeat:'off',tick:0,seen:Date.now(),qv:0,sentQv:0,pend:0,bt:null,
         s:{songId:null,state:'paused',position:0,ts:Date.now()}
       };
       rooms.set(r.id,r);
