@@ -165,7 +165,7 @@ function fetchYT(vid){
     await slot();
     try{
       const out=await new Promise((ok,bad)=>execFile(YTDLP,[
-        '--no-playlist','--no-warnings','--no-progress','--concurrent-fragments','4','--max-filesize','200M',
+        '--no-playlist','--max-filesize', '200M','--js-runtimes', 'node','-f', '140/bestaudio[ext=m4a]/bestaudio',
         '-f','140/bestaudio[ext=m4a]/bestaudio','--print-json','-o',path.join(CACHE,id+'.%(ext)s'),
         'https://www.youtube.com/watch?v='+vid
       ],{maxBuffer:1<<26,timeout:8*60e3},(e,so)=>e?bad(e):ok(String(so))));
