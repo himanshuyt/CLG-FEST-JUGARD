@@ -1,1 +1,7 @@
 node_modules/
+.env
+
+music/ytcache/*
+music/uploads/*
+music/uploads.json
+music/ytcache.json

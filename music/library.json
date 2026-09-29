@@ -5,34 +5,7 @@
     "artist": "Demo Artist",
     "album": "Demo EP",
     "artwork": "/music/artwork/song001.svg",
-    "audio": "/music/audio/song001.wav",
-    "duration": 40
-  },
-  {
-    "id": "song002",
-    "title": "Midnight Loop",
-    "artist": "Demo Artist",
-    "album": "Demo EP",
-    "artwork": "/music/artwork/song002.svg",
-    "audio": "/music/audio/song002.wav",
-    "duration": 40
-  },
-  {
-    "id": "song003",
-    "title": "Sunrise Pulse",
-    "artist": "Demo Artist",
-    "album": "Demo EP",
-    "artwork": "/music/artwork/song003.svg",
-    "audio": "/music/audio/song003.wav",
-    "duration": 40
-  },
-  {
-    "id": "song004",
-    "title": "new",
-    "artist": "yoyo", 
-    "album": "badshah",
-    "artwork": "/music/artwork/song004.svg",
-    "audio": "/music/audio/song004.wav",
+    "audio": "/music/audio/song001.mp3",
     "duration": 40
   }
 ]
