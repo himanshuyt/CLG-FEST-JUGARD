@@ -157,15 +157,41 @@ function endRoom(r){
 
 let active=0;
 const waitq=[],dl=new Map();
-const slot=()=>new Promise(res=>{const go=()=>{active++;res()};active<MAX_DL?go():waitq.push(go)});
-const free=()=>{active--;const n=waitq.shift();if(n)n()};
 
-function fetchYT(vid){
+const slot=(priority='normal')=>new Promise(res=>{
+  const go=()=>{
+    active++;
+    res();
+  };
+
+  if(active<MAX_DL){
+    go();
+    return;
+  }
+
+  const job={go,priority};
+
+  if(priority==='high'){
+    const i=waitq.findIndex(x=>x.priority!=='high');
+    if(i===-1) waitq.push(job);
+    else waitq.splice(i,0,job);
+  }else{
+    waitq.push(job);
+  }
+});
+
+const free=()=>{
+  active--;
+  const i=waitq.findIndex(x=>x.priority==='high');
+  const job=i===-1?waitq.shift():waitq.splice(i,1)[0];
+  if(job)job.go();
+};
+function fetchYT(vid,priority='normal'){
   const id='yt_'+vid,c=ytc.get(id);
   if(c&&fs.existsSync(path.join(CACHE,path.basename(c.audio)))){c.used=Date.now();saveYT();return Promise.resolve(c)}
   if(dl.has(vid))return dl.get(vid);
   const p=(async()=>{
-    await slot();
+    await slot(priority);
     try{
       const out=await new Promise((ok,bad)=>execFile(YTDLP,[
         '--no-playlist','--max-filesize', '200M','--js-runtimes', 'node','--cookies', '/tmp/cookies.txt','-f', '140/bestaudio[ext=m4a]/bestaudio',
@@ -194,7 +220,7 @@ async function ytRoom(r,vid,play){
   if(!ytc.has(id))notice(r,'Downloading song, please wait...');
   r.pend++;
   try{
-    const song=await fetchYT(vid);
+    const song=await fetchYT(vid,play?'high':'normal');
     if(!rooms.has(r.id))return;
     r.yt.set(id,song);r.qv++;
     addQ(r,id);
