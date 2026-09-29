@@ -378,6 +378,13 @@ wss.on('connection',ws=>{
       return;
     }
 
+    if(m.type==='YOUTUBE_PREPARE'){
+      const vid=ytId(m.url);
+      if(!vid)return;
+      fetchYT(vid,'high').catch(()=>{});
+      return;
+    }
+
     if(m.type==='YOUTUBE_ADD'){
       const vid=ytId(m.url);
       if(!vid)return err(ws,'Invalid YouTube link.');

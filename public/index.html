@@ -327,6 +327,21 @@ function rm(i){
 
 const serverNow=()=>now()+offset;
 
+let ytPrepareTimer;
+
+function prepareYT(){
+  if(role!=='commander')return;
+
+  const i=$('#ytUrl'),u=i?i.value.trim():'';
+  if(!u)return;
+
+  clearTimeout(ytPrepareTimer);
+
+  ytPrepareTimer=setTimeout(()=>{
+    cmd('YOUTUBE_PREPARE',{url:u});
+  },300);
+}
+
 function addYT(play){
   const i=$('#ytUrl'),u=i?i.value.trim():'';
   if(!u)return;
@@ -422,7 +437,11 @@ function ytColumn(){
     <h3>▶ YouTube</h3>
     <div class="lbl">Paste a YouTube link</div>
     <div style="margin-top:10px">
-      <input id="ytUrl" placeholder="https://youtube.com/watch?v=..." onkeydown="if(event.key==='Enter')addYT(true)">
+      <input id="ytUrl"
+  placeholder="https://youtube.com/watch?v=..."
+  onpaste="setTimeout(prepareYT,50)"
+  oninput="prepareYT()"
+  onkeydown="if(event.key==='Enter')addYT(true)">
     </div>
     <div class="two">
       <button class="pri" onclick="addYT(true)">▶ Play</button>
