@@ -271,13 +271,13 @@ function syncYouTube(song,target,playing,hold){
       const ps=ytPlayer.getPlayerState(),P=YT.PlayerState;
       if(role==='commander'){const d=Number(ytPlayer.getDuration()||0);if(d>0&&Math.abs((song.duration||0)-d)>1&&now()-lastDur>3000){lastDur=now();cmd('LOCAL_DURATION_UPDATE',{id:song.id,duration:d})}}
       if(hold&&ps===P.PLAYING&&now()-lastReady>700){lastReady=now();cmd('AUDIO_READY',{id:song.id})}
-      if((playing||hold)&&audioOn&&!ytPlayedOnce&&now()-ytStartAt>6000){toFallback(song.videoId,'no playback in 6s');return}
+      if((playing||hold)&&audioOn&&!ytPlayedOnce&&now()-ytStartAt>6000){audioMsg='waiting for YouTube to start - tap the screen once';if(now()-lastRate>2500){lastRate=now();try{ytPlayer.playVideo()}catch{}}}
       if(playing||hold){
         if(audioOn&&(ps===-1||ps===P.PAUSED||ps===P.CUED)){try{if(ytPlayer.isMuted())ytPlayer.unMute()}catch{}ytPlayer.playVideo()}
         else if(playing&&ps===P.PLAYING){
           const dd=Number(ytPlayer.getCurrentTime()||0)-target,a=Math.abs(dd);drift=dd;synced=a<0.3;
-          if(a>(role==='commander'?1.5:0.6)&&now()-lastSeek>2500){lastSeek=now();ytSeekAt=now();ytRate=1;try{ytPlayer.setPlaybackRate(1)}catch{}ytPlayer.seekTo(Math.max(0,target+ytLat),true)}
-          else if(role!=='commander'){if(ytRate!==1){if(now()>=ytRateUntil){ytRate=1;try{ytPlayer.setPlaybackRate(1)}catch{}}}else if(a>0.12&&now()>ytCool){ytRate=dd<0?1.25:0.75;const ms=Math.min(2500,a/0.25*1000);ytRateUntil=now()+ms;ytCool=now()+ms+1200;try{ytPlayer.setPlaybackRate(ytRate)}catch{}}}
+          if(a>(role==='commander'?1.5:0.9)&&now()-lastSeek>4000){lastSeek=now();ytSeekAt=now();ytRate=1;try{ytPlayer.setPlaybackRate(1)}catch{}ytPlayer.seekTo(Math.max(0,target+ytLat),true)}
+          else if(role!=='commander'){if(ytRate!==1){if(now()>=ytRateUntil){ytRate=1;try{ytPlayer.setPlaybackRate(1)}catch{}}}else if(a>0.3&&now()>ytCool){ytRate=dd<0?1.25:0.75;const ms=Math.min(2500,a/0.25*1000);ytRateUntil=now()+ms;ytCool=now()+ms+1200;try{ytPlayer.setPlaybackRate(ytRate)}catch{}}}
         }
       }else if(ps===P.PLAYING||ps===P.BUFFERING)ytPlayer.pauseVideo();
     }catch(e){}
@@ -679,7 +679,7 @@ function tick(){
     if(s.state==='loading'&&role==='commander'&&loaded===song.id&&au.readyState>=3&&now()-lastReady>700){lastReady=now();cmd('AUDIO_READY',{id:song.id})}
     if(loaded!==song.id){auStart=now();au.pause();au.src=song.audio||(song.videoId?'/yt-audio/'+song.videoId:'');au.load();loaded=song.id;setBoost(boost)}
     if(audioOn&&au.readyState<3&&now()-auStart>9000&&(playing||s.state==='loading'))audioMsg='server audio is not loading';
-    if(playing){if(au.paused&&audioOn)au.play().catch(e=>{if(now()-(window.__pe||0)>3000){window.__pe=now();dbg('au.play() blocked: '+e.name+' '+e.message)}});const lat=outLat(),d=au.currentTime-(tgt+lat),a=Math.abs(d);drift=d;if(a>(role==='commander'?1.5:0.4)&&now()-lastSeek>1500&&!au.seeking){try{au.currentTime=tgt+lat+seekLat;seekAt=now()}catch{}lastSeek=now();au.playbackRate=1}else if(role!=='commander'){const cr=au.playbackRate;let nr=cr;if(a>0.03)nr=1-Math.sign(d)*Math.min(0.05,0.01+a*0.4);else if(a<0.012)nr=1;if(Math.abs(nr-cr)>0.004&&now()-lastRate>400){lastRate=now();au.playbackRate=nr}}else au.playbackRate=1;synced=a<0.15}else{if(!au.paused)au.pause();au.playbackRate=1;if(Math.abs(au.currentTime-tgt)>0.05){try{au.currentTime=tgt}catch{}}synced=true}
+    if(playing){if(au.paused&&audioOn)au.play().catch(e=>{if(now()-(window.__pe||0)>3000){window.__pe=now();dbg('au.play() blocked: '+e.name+' '+e.message)}});const lat=outLat(),d=au.currentTime-(tgt+lat),a=Math.abs(d);drift=d;if(a>(role==='commander'?1.5:0.4)&&now()-lastSeek>1500&&!au.seeking){try{au.currentTime=tgt+lat+seekLat;seekAt=now()}catch{}lastSeek=now();au.playbackRate=1}else if(role!=='commander'){const cr=au.playbackRate;let nr=cr;if(a>0.06)nr=1-Math.sign(d)*Math.min(0.03,0.008+a*0.15);else if(a<0.02)nr=1;if(Math.abs(nr-cr)>0.004&&now()-lastRate>1000){lastRate=now();au.playbackRate=nr}}else au.playbackRate=1;synced=a<0.15}else{if(!au.paused)au.pause();au.playbackRate=1;if(Math.abs(au.currentTime-tgt)>0.05){try{au.currentTime=tgt}catch{}}synced=true}
   }
   const cur=$('#cur');if(cur)cur.textContent=fmt(tgt);const bar=$('#bar');if(bar&&!dragging){if(song.duration>0)bar.max=song.duration;bar.value=tgt}const pb=$('#pb');if(pb&&song.duration>0)pb.style.width=(100*tgt/song.duration)+'%';const st=$('#st');if(st){const h=status();if(h!==lastStatus&&now()-lastSt>500){lastSt=now();lastStatus=h;st.innerHTML=h}}playOK=useYT(song)?!!(ytPlayer&&ytLoadedId===song.id&&typeof ytPlayer.getPlayerState==='function'&&ytPlayer.getPlayerState()===1):(!au.paused&&au.readyState>=3);if(playOK)audioMsg='';
   preload();
@@ -769,7 +769,7 @@ function queue(){
   </section>`;
 }
 
-const HEADER=r=>`<header><b>SYNC<i>ROOM</i></b>${r?`<span class="lbl">${r}</span>`:''}</header><div class="brand">XENBERG</div><div class="presents">Presents</div><div style="text-align:center;font-size:10px;opacity:.4;margin-top:4px">build 6</div>`;
+const HEADER=r=>`<header><b>SYNC<i>ROOM</i></b>${r?`<span class="lbl">${r}</span>`:''}</header><div class="brand">XENBERG</div><div class="presents">Presents</div><div onclick="toggleDbg()" style="text-align:center;font-size:11px;opacity:.55;margin-top:4px;cursor:pointer;text-decoration:underline">build 8 · tap for debug</div>`;
 
 function volumeCard(label){
   return `<section class="card">
@@ -975,6 +975,33 @@ function draw(){
 
 draw();
 
+
+// ---- Debug panel (tap "build 8" under Presents) ----
+let dbgOn=false,dbgEl=null,dbgT=null;
+function dbgText(){
+  const sg=snap&&(snap.snapSong||snap.song),L=[];
+  const yt=sg?useYT(sg):false;let ps='-';try{if(ytPlayer&&ytPlayer.getPlayerState)ps=ytPlayer.getPlayerState()}catch{}
+  L.push('build 8  role='+role+'  conn='+conn+'  ws='+(ws?ws.readyState:'none'));
+  L.push('room='+roomId+'  devices='+(snap?snap.devices:'-')+'  state='+(snap?snap.state:'-'));
+  L.push('song='+(sg?sg.id+' ['+sg.source+']':'-'));
+  L.push('engine='+(sg?(yt?'YouTube embed':'server audio'):'-')+'  playOK='+playOK+'  audioOn='+audioOn);
+  L.push('YT: state='+ps+' rate='+ytRate+' loaded='+ytLoadedId+' fallbacks='+ytFB.size);
+  L.push('AU: ready='+au.readyState+' paused='+au.paused+' t='+au.currentTime.toFixed(2)+' rate='+au.playbackRate.toFixed(3)+' err='+(au.error?au.error.code:'-'));
+  L.push('target='+tgt.toFixed(3)+'s  drift='+Math.round(drift*1000)+' ms  synced='+synced);
+  L.push('clock offset='+Math.round(offset)+' ms  rtt='+Math.round(rtt)+' ms  samples='+samples.length);
+  L.push('fine-tune='+Math.round(syncAdj*1000)+' ms  outputLatency='+Math.round(outLat()*1000)+' ms');
+  L.push('msg='+audioMsg);
+  L.push('--- log ---');
+  return L.concat(dbgLog.slice(-12)).join('\n');
+}
+function toggleDbg(){
+  dbgOn=!dbgOn;
+  if(!dbgEl){dbgEl=document.createElement('div');dbgEl.style.cssText='position:fixed;left:0;right:0;bottom:0;max-height:48vh;overflow:auto;background:#000d;color:#9fffb4;font:11px/1.45 monospace;padding:8px 10px;z-index:9999;white-space:pre-wrap;border-top:1px solid #444';document.body.appendChild(dbgEl)}
+  dbgEl.style.display=dbgOn?'block':'none';
+  clearInterval(dbgT);
+  if(dbgOn){const f=()=>{dbgEl.innerHTML='<div style="display:flex;gap:8px;margin-bottom:6px"><button style="min-height:30px;min-width:0;padding:0 10px" onclick="copyDbg()">Copy</button><button style="min-height:30px;min-width:0;padding:0 10px" onclick="toggleDbg()">Close</button></div>'+dbgText().replace(/&/g,'&amp;').replace(/</g,'&lt;')};f();dbgT=setInterval(f,700)}
+}
+function copyDbg(){try{navigator.clipboard.writeText(dbgText());flash('Debug info copied')}catch{flash('Could not copy')}}
 </script>
 </body>
 </html>

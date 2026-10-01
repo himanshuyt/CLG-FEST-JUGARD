@@ -389,7 +389,7 @@ wss.on('connection',ws=>{
       const p=Number(m.pos);
       if(s.state==='playing'&&m.id===s.songId&&Number.isFinite(p)&&p>=0&&Math.abs(p-pos(r))<1.5){
         const t=Number(m.t),n=Date.now();
-        r.s={...s,position:p,ts:(Number.isFinite(t)&&Math.abs(t-n)<1500)?t:n};
+        if(Math.abs(p-pos(r))>0.05)r.s={...s,position:p,ts:(Number.isFinite(t)&&Math.abs(t-n)<1500)?t:n};
         const d=JSON.stringify({type:'POS',songId:s.songId,position:pos(r),serverTime:n});
         r.members.forEach(w=>{if(w!==ws&&w.readyState===1&&w.bufferedAmount<65536)w.send(d)});
       }
