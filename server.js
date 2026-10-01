@@ -52,6 +52,7 @@ function persistDuration(song,duration){song.duration=duration;if(uploaded.inclu
 
 const app=express();
 app.disable('x-powered-by');
+app.use((req,res,next)=>{if(req.path==='/'||/\.html$/i.test(req.path)||req.path.startsWith('/join/'))res.set('Cache-Control','no-store');next()});
 app.use('/music',(req,res,next)=>/\.json$/i.test(req.path)?res.sendStatus(404):next());
 app.use('/music',express.static(MUSIC,{maxAge:'7d',index:false}));
 app.use('/vendor',express.static(path.join(D,'node_modules/qrcode/build'),{maxAge:'7d'}));
