@@ -232,10 +232,10 @@ function fixAudio(p){
 ['pointerdown','keydown','touchstart'].forEach(ev=>document.addEventListener(ev,()=>{if(ytPlayer)fixAudio(ytPlayer)},{passive:true}));
 const dbgLog=[];function dbg(m){dbgLog.push(new Date().toLocaleTimeString()+'  '+m);if(dbgLog.length>40)dbgLog.shift()}
 window.addEventListener('error',e=>dbg('JS ERROR: '+e.message));window.addEventListener('unhandledrejection',e=>dbg('PROMISE: '+(e.reason&&e.reason.message||e.reason)));
-let ytGate=0,ytStartAt=0,ytPlayedOnce=false;const ytFB=new Set(),spEmbed=new Set(),useYT=s=>!!(s&&s.videoId&&!ytFB.has(s.videoId)&&(s.source!=='spotify'||spEmbed.has(s.videoId)));
-let auStart=0;
+let ytGate=0,ytStartAt=0,ytPlayedOnce=false;const ytFB=new Set(),spEmbed=new Set(),useYT=s=>!!(s&&s.videoId&&!ytFB.has(s.videoId));
+let auStart=0,audioMsg='',playOK=false;
 function spFallback(sg,why){if(!sg||!sg.videoId||spEmbed.has(sg.videoId))return;dbg('Spotify song: server audio failed ('+why+'), switching to YouTube player');spEmbed.add(sg.videoId);loaded=null;try{au.pause();au.removeAttribute('src')}catch{}flash('Switching to YouTube player for this song...')}
-function toFallback(vid,why){if(!vid||ytFB.has(vid))return;dbg('FALLBACK to server audio ('+(why||'?')+')');ytFB.add(vid);flash('Using server audio for this song...');destroyYT();loaded=null}
+function toFallback(vid,why){if(!vid||ytFB.has(vid))return;dbg('FALLBACK to server audio ('+(why||'?')+')');ytFB.add(vid);audioMsg='YouTube player blocked ('+(why||'?')+'), trying server audio';flash('Using server audio for this song...');destroyYT();loaded=null}
 function syncYouTube(song,target,playing,hold){
   if(!song||!useYT(song))return;
   const want=!!(audioOn&&(playing||hold));
@@ -345,7 +345,7 @@ function preload(){
   const i=snap.queue.indexOf(snap.songId),nid=snap.queue[i+1<snap.queue.length?i+1:0],s=nid&&nid!==snap.songId?getSong(nid):null;
   if(s&&s.audio&&preId!==nid){preId=nid;pre.src=s.audio;pre.load()}
 }
-au.onerror=()=>{const er=au.error;dbg('AUDIO ERROR code '+(er&&er.code)+' '+(er&&er.message||'')+' src='+au.src.slice(-30));const sg=snap&&(snap.snapSong||snap.song);if(!sg||!sg.videoId||!au.getAttribute('src'))return;if(sg.source==='spotify')spFallback(sg,'audio error');else flash('Server audio failed for this song.')};
+au.onerror=()=>{const er=au.error;dbg('AUDIO ERROR code '+(er&&er.code)+' '+(er&&er.message||'')+' src='+au.src.slice(-30));const sg=snap&&(snap.snapSong||snap.song);if(!sg||!sg.videoId||!au.getAttribute('src'))return;audioMsg='server audio failed, YouTube blocked it on the server';flash('No audio: this song is blocked on both players.')};
 au.addEventListener('canplay',()=>tick());
 au.addEventListener('seeked',()=>{if(seekAt){seekLat=0.5*seekLat+0.5*Math.min(2.5,(now()-seekAt)/1000);seekAt=0}});
 au.onended=()=>{if(role==='commander'&&loaded)cmd('ENDED',{id:loaded})};
@@ -678,10 +678,11 @@ function tick(){
     if(role==='commander'&&isFinite(au.duration)&&au.duration>0&&loaded===song.id&&Math.abs((song.duration||0)-au.duration)>0.5&&now()-lastDur>3000){lastDur=now();cmd('LOCAL_DURATION_UPDATE',{id:song.id,duration:au.duration})}
     if(s.state==='loading'&&role==='commander'&&loaded===song.id&&au.readyState>=3&&now()-lastReady>700){lastReady=now();cmd('AUDIO_READY',{id:song.id})}
     if(loaded!==song.id){auStart=now();au.pause();au.src=song.audio||(song.videoId?'/yt-audio/'+song.videoId:'');au.load();loaded=song.id;setBoost(boost)}
-    if(song.source==='spotify'&&song.videoId&&audioOn&&au.readyState<3&&now()-auStart>9000&&(playing||s.state==='loading'))spFallback(song,'no audio in 9s');
+    if(audioOn&&au.readyState<3&&now()-auStart>9000&&(playing||s.state==='loading'))audioMsg='server audio is not loading';
     if(playing){if(au.paused&&audioOn)au.play().catch(e=>{if(now()-(window.__pe||0)>3000){window.__pe=now();dbg('au.play() blocked: '+e.name+' '+e.message)}});const lat=outLat(),d=au.currentTime-(tgt+lat),a=Math.abs(d);drift=d;if(a>(role==='commander'?1.5:0.4)&&now()-lastSeek>1500&&!au.seeking){try{au.currentTime=tgt+lat+seekLat;seekAt=now()}catch{}lastSeek=now();au.playbackRate=1}else if(role!=='commander'){const cr=au.playbackRate;let nr=cr;if(a>0.03)nr=1-Math.sign(d)*Math.min(0.05,0.01+a*0.4);else if(a<0.012)nr=1;if(Math.abs(nr-cr)>0.004&&now()-lastRate>400){lastRate=now();au.playbackRate=nr}}else au.playbackRate=1;synced=a<0.15}else{if(!au.paused)au.pause();au.playbackRate=1;if(Math.abs(au.currentTime-tgt)>0.05){try{au.currentTime=tgt}catch{}}synced=true}
   }
-  const cur=$('#cur');if(cur)cur.textContent=fmt(tgt);const bar=$('#bar');if(bar&&!dragging){if(song.duration>0)bar.max=song.duration;bar.value=tgt}const pb=$('#pb');if(pb&&song.duration>0)pb.style.width=(100*tgt/song.duration)+'%';const st=$('#st');if(st){const h=status();if(h!==lastStatus&&now()-lastSt>500){lastSt=now();lastStatus=h;st.innerHTML=h}}preload();
+  const cur=$('#cur');if(cur)cur.textContent=fmt(tgt);const bar=$('#bar');if(bar&&!dragging){if(song.duration>0)bar.max=song.duration;bar.value=tgt}const pb=$('#pb');if(pb&&song.duration>0)pb.style.width=(100*tgt/song.duration)+'%';const st=$('#st');if(st){const h=status();if(h!==lastStatus&&now()-lastSt>500){lastSt=now();lastStatus=h;st.innerHTML=h}}playOK=useYT(song)?!!(ytPlayer&&ytLoadedId===song.id&&typeof ytPlayer.getPlayerState==='function'&&ytPlayer.getPlayerState()===1):(!au.paused&&au.readyState>=3);if(playOK)audioMsg='';
+  preload();
   if(role==='commander'&&playing&&now()-lastRep>1000){let p=null;
     if(useYT(song)){if(ytPlayer&&ytLoadedId===song.id&&now()>=ytGate&&typeof ytPlayer.getPlayerState==='function'&&ytPlayer.getPlayerState()===YT.PlayerState.PLAYING)p=Number(ytPlayer.getCurrentTime())}
     else if(loaded===song.id&&!au.paused&&!au.seeking&&au.readyState>=3)p=au.currentTime-outLat();
@@ -696,6 +697,7 @@ function status(){
   if(!audioOn)return '<span class="w">● Tap once to enable audio</span>';
   if(snap.state==='loading')return '<span class="w">⏳ Loading song...</span>';
   if(snap.state!=='playing')return '<span class="g">✓ Audio ready · Paused</span>';
+  if(!playOK)return '<span class="w">● Waiting for audio'+(audioMsg?' · '+esc(audioMsg):'...')+'</span>';
   return synced?'<span class="g">● Synchronized'+(role==='commander'?' (master)':' ('+(drift>=0?'+':'−')+Math.round(Math.abs(drift)*1000)+' ms)')+'</span>':'<span class="w">● Synchronizing...</span>';
 }
 
