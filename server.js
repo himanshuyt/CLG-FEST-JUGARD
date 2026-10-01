@@ -1,155 +1,58 @@
-const express=require('express'),http=require('http'),{WebSocketServer}=require('ws'),crypto=require('crypto'),fs=require('fs'),path=require('path'),os=require('os'),QRCode=require('qrcode'),{execFile}=require('child_process');
-const {Readable}=require('stream');
-const D=__dirname,PORT=process.env.PORT||3000,MUSIC=process.env.MUSIC_DIR||path.join(D,'music'),UP=path.join(MUSIC,'uploads'),CACHE=path.join(MUSIC,'ytcache');
-if (fs.existsSync('/etc/secrets/cookies.txt')) {
-  fs.copyFileSync('/etc/secrets/cookies.txt', '/tmp/cookies.txt');
-}
-const UPDB=path.join(MUSIC,'uploads.json'),LIBDB=path.join(MUSIC,'library.json'),YTDB=path.join(MUSIC,'ytcache.json');
-const YTDLP=process.env.YTDLP||'yt-dlp';
-const MAX_UPLOAD=250*1024*1024,MAX_DL=3,CACHE_DAYS=3,CACHE_MAX=300,MAX_QUEUE=200,ROOM_LIFETIME=9*60*60*1000,MAX_MEMBERS=1000;
-fs.mkdirSync(UP,{recursive:true});fs.mkdirSync(CACHE,{recursive:true});
-
+const express=require('express'),http=require('http'),{WebSocketServer}=require('ws'),crypto=require('crypto'),fs=require('fs'),path=require('path'),os=require('os'),QRCode=require('qrcode');
+const D=__dirname,PORT=process.env.PORT||3000,MUSIC=process.env.MUSIC_DIR||path.join(D,'music'),UP=path.join(MUSIC,'uploads');
+const UPDB=path.join(MUSIC,'uploads.json'),LIBDB=path.join(MUSIC,'library.json');
+const MAX_UPLOAD=250*1024*1024,MAX_QUEUE=200,ROOM_LIFETIME=9*60*60*1000,MAX_MEMBERS=40,MAX_ROOMS=20;
+fs.mkdirSync(UP,{recursive:true});
 process.on('uncaughtException',e=>console.error('UNCAUGHT:',e));
 process.on('unhandledRejection',e=>console.error('UNHANDLED:',e));
-
 const readJSON=(f,d)=>{try{return JSON.parse(fs.readFileSync(f,'utf8'))}catch{return d}};
 const debounce=(fn,ms)=>{let t;return()=>{clearTimeout(t);t=setTimeout(fn,ms)}};
 const write=(f,v)=>fs.writeFile(f,JSON.stringify(v,null,2),e=>{if(e)console.error('WRITE ERROR:',f,e.message)});
-
 const baseSongs=readJSON(LIBDB,[]);
 let uploaded=readJSON(UPDB,[]);
-const ytc=new Map(readJSON(YTDB,[]).map(s=>[s.id,s]));
-const ytStreams=new Map();
-
-setInterval(()=>{
-  const now=Date.now();
-  for(const [id,s] of ytStreams){
-    if(s.expires&&s.expires<now)ytStreams.delete(id);
-  }
-},10*60e3);
+const catalog=new Map([...baseSongs,...uploaded].map(s=>[s.id,s]));
+const ytMeta=new Map();
 const saveUploads=debounce(()=>write(UPDB,uploaded),300);
 const saveLibrary=debounce(()=>write(LIBDB,baseSongs),300);
-const saveYT=debounce(()=>write(YTDB,[...ytc.values()]),300);
-
-uploaded=uploaded.filter(s=>{
-  if(!String(s.id).startsWith('yt_'))return true;
-  const f=path.basename(String(s.audio||''));
-  try{fs.renameSync(path.join(UP,f),path.join(CACHE,f))}catch{}
-  ytc.set(s.id,{...s,audio:'/music/ytcache/'+f,used:Date.now()});
-  return false;
-});
-for(const [id,s] of [...ytc]){
-  if(!fs.existsSync(path.join(CACHE,path.basename(String(s.audio||''))))){ytc.delete(id)}
-}
-const catalog=new Map();
-[...baseSongs,...uploaded,...ytc.values()].forEach(s=>catalog.set(s.id,s));
-{
-  const keep=new Set([...ytc.values()].map(s=>path.basename(s.audio)));
-  fs.readdirSync(CACHE).forEach(f=>{if(!keep.has(f))fs.unlink(path.join(CACHE,f),()=>{})});
-}
-saveUploads();saveYT();
-
-const pub=s=>{if(!s)return null;const{owner,used,...o}=s;return o};
+const pub=s=>{if(!s)return null;const{owner,...o}=s;return o};
 const getUid=req=>{const u=String(req.get('x-uid')||'');return /^[a-f0-9]{16,64}$/.test(u)?u:null};
 const tokEq=(a,b)=>{a=Buffer.from(String(a||''));b=Buffer.from(String(b||''));return a.length===b.length&&crypto.timingSafeEqual(a,b)};
-const ytId=u=>{const m=String(u||'').slice(0,300).trim().match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/|v\/))([A-Za-z0-9_-]{11})/);return m?m[1]:null};
-
-function persistDuration(song,duration){
-  song.duration=duration;
-  if(uploaded.includes(song))saveUploads();
-  else if(baseSongs.includes(song))saveLibrary();
-  else if(ytc.has(song.id))saveYT();
+const ytId=u=>{const x=String(u||'').trim();if(/^[A-Za-z0-9_-]{11}$/.test(x))return x;const m=x.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/|v\/))([A-Za-z0-9_-]{11})/);return m?m[1]:null};
+const ytPlaylistId=u=>{try{return new URL(String(u||'')).searchParams.get('list')}catch{return null}};
+async function youtubeVideoMeta(vid){
+  if(ytMeta.has(vid))return ytMeta.get(vid);
+  try{const r=await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent('https://www.youtube.com/watch?v='+vid)}&format=json`,{headers:{'User-Agent':'Mozilla/5.0'}});if(r.ok){const j=await r.json();const m={title:j.title||'YouTube',artist:j.author_name||'YouTube',artwork:`https://i.ytimg.com/vi/${vid}/hqdefault.jpg`};ytMeta.set(vid,m);return m}}catch(e){}
+  return {title:'YouTube Audio',artist:'YouTube',artwork:`https://i.ytimg.com/vi/${vid}/hqdefault.jpg`};
 }
+async function youtubePlaylistMeta(url){
+  const playlistId=ytPlaylistId(url);if(!playlistId)throw new Error('Invalid YouTube playlist link.');
+  const r=await fetch(`https://www.youtube.com/playlist?list=${encodeURIComponent(playlistId)}`,{headers:{'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153 Safari/537.36'}});
+  if(!r.ok)throw new Error('Could not read YouTube playlist.');
+  const html=await r.text(),ids=[];let m;const re=/\"videoId\":\"([A-Za-z0-9_-]{11})\"/g;
+  while((m=re.exec(html))&&ids.length<100){if(!ids.includes(m[1]))ids.push(m[1])}
+  if(!ids.length)throw new Error('No playable videos found in that YouTube playlist.');
+  const tracks=[];
+  // Resolve metadata in small concurrent batches so playlist import stays fast even for large lists.
+  for(let i=0;i<ids.length;i+=8){
+    const batch=await Promise.all(ids.slice(i,i+8).map(async vid=>[vid,await youtubeVideoMeta(vid)]));
+    for(const [vid,meta] of batch){
+      const id='yt_'+vid,song={id,type:'youtube',source:'youtube',videoId:vid,title:meta.title,artist:meta.artist,album:'YouTube',artwork:meta.artwork,audio:null,duration:0};
+      catalog.set(id,song);tracks.push(song);
+    }
+  }
+  return {playlistId,playlistName:'YouTube Playlist',tracks};
+}
+async function resolveYouTube(input){
+  if(ytPlaylistId(input))return {type:'playlist',...await youtubePlaylistMeta(input)};
+  const vid=ytId(input);if(!vid)throw new Error('Invalid YouTube link.');
+  const meta=await youtubeVideoMeta(vid),song={id:'yt_'+vid,type:'youtube',source:'youtube',videoId:vid,title:meta.title,artist:meta.artist,album:'YouTube',artwork:meta.artwork,audio:null,duration:0};catalog.set(song.id,song);return {type:'track',playlistName:meta.title,tracks:[song]};
+}
+
+function persistDuration(song,duration){song.duration=duration;if(uploaded.includes(song))saveUploads();else if(baseSongs.includes(song))saveLibrary()}
 
 const app=express();
 app.disable('x-powered-by');
 app.use('/music',(req,res,next)=>/\.json$/i.test(req.path)?res.sendStatus(404):next());
-app.get('/api/ytstream/:id',async(req,res)=>{
-  const id=String(req.params.id||'');
-  const s=ytStreams.get(id);
-
-  if(!s)return res.sendStatus(404);
-
-  try{
-    const headers={...(s.headers||{})};
-
-    if(req.headers.range)headers.Range=req.headers.range;
-
-    const upstream=await fetch(s.url,{
-      headers,
-      redirect:'follow'
-    });
-
-    if(!upstream.ok||!upstream.body){
-
-  if(upstream.status===403){
-    ytStreams.delete(id);
-
-    try{
-      await fetchYT(id.startsWith('yt_')?id.slice(3):id,'high');
-
-      const retry=ytStreams.get(id);
-
-      if(retry){
-        const retryHeaders={...(retry.headers||{})};
-
-        if(req.headers.range){
-          retryHeaders.Range=req.headers.range;
-        }
-
-        const retryUpstream=await fetch(retry.url,{
-          headers:retryHeaders,
-          redirect:'follow'
-        });
-
-        if(retryUpstream.ok&&retryUpstream.body){
-          res.status(retryUpstream.status);
-
-          for(const h of [
-            'content-type',
-            'content-length',
-            'content-range',
-            'accept-ranges',
-            'cache-control'
-          ]){
-            const v=retryUpstream.headers.get(h);
-            if(v)res.setHeader(h,v);
-          }
-
-          res.setHeader('Access-Control-Allow-Origin','*');
-
-          return Readable.fromWeb(retryUpstream.body).pipe(res);
-        }
-      }
-    }catch(e){
-      console.error('YT STREAM RETRY ERROR:',e.message||e);
-    }
-  }
-
-  return res.status(502).send('YouTube stream unavailable.');
-}
-
-    res.status(upstream.status);
-
-    for(const h of [
-      'content-type',
-      'content-length',
-      'content-range',
-      'accept-ranges',
-      'cache-control'
-    ]){
-      const v=upstream.headers.get(h);
-      if(v)res.setHeader(h,v);
-    }
-
-    res.setHeader('Access-Control-Allow-Origin','*');
-
-    Readable.fromWeb(upstream.body).pipe(res);
-  }catch(e){
-    console.error('YT STREAM ERROR:',e.message||e);
-    if(!res.headersSent)res.status(502).send('YouTube stream failed.');
-  }
-});
 app.use('/music',express.static(MUSIC,{maxAge:'7d',index:false}));
 app.use('/vendor',express.static(path.join(D,'node_modules/qrcode/build'),{maxAge:'7d'}));
 app.use(express.static(path.join(D,'public'),{maxAge:0}));
@@ -160,6 +63,104 @@ app.get('/api/songs',(req,res)=>{
   res.set('Cache-Control','no-store');
   res.json([...baseSongs,...uploaded.filter(s=>uid&&s.owner===uid)].map(pub));
 });
+
+
+// ---- YouTube audio proxy (fallback for embed-blocked videos; needs yt-dlp installed) ----
+const {execFile}=require('child_process'),{Readable}=require('stream');
+const ytUrlCache=new Map();let ytGood=null;
+function ytDlpUrl(vid){
+  const c=ytUrlCache.get(vid);if(c&&c.exp>Date.now())return Promise.resolve(c.url);
+  const args=['-f','bestaudio[ext=m4a]/bestaudio','-g','--no-playlist','--no-warnings','--socket-timeout','10','https://www.youtube.com/watch?v='+vid];
+  const tries=[['yt-dlp',args],['python',['-m','yt_dlp',...args]],['python3',['-m','yt_dlp',...args]],['py',['-m','yt_dlp',...args]]].map((t,k)=>[...t,k]);
+  const ord=ytGood==null?tries:[tries[ytGood],...tries.filter(t=>t[2]!==ytGood)];
+  return new Promise((resolve,reject)=>{
+    let i=0;const next=()=>{
+      if(i>=ord.length)return reject(new Error('yt-dlp not found or failed. Install it: pip install -U yt-dlp'));
+      const [cmd,a,k]=ord[i++];
+      execFile(cmd,a,{timeout:25000,windowsHide:true,maxBuffer:1<<20},(e,out)=>{
+        const url=String(out||'').split('\n')[0].trim();
+        if(e||!/^https?:/.test(url))return next();
+        ytGood=k;ytUrlCache.set(vid,{url,exp:Date.now()+90*60*1000});resolve(url);
+      });
+    };next();
+  });
+}
+
+const ytPend=new Map();
+function ytDlpUrlOnce(vid){
+  const c=ytUrlCache.get(vid);if(c&&c.exp>Date.now())return Promise.resolve(c.url);
+  if(ytPend.has(vid))return ytPend.get(vid);
+  const p=ytDlpUrl(vid).finally(()=>ytPend.delete(vid));ytPend.set(vid,p);return p;
+}
+// pre-resolve audio URLs (Spotify songs) so playback does not wait for yt-dlp when a song starts
+const warmQ=[];let warmBusy=0;
+function warmPump(){while(warmBusy<3&&warmQ.length){const v=warmQ.shift();warmBusy++;ytDlpUrlOnce(v).catch(()=>{}).finally(()=>{warmBusy--;warmPump()})}}
+function prewarm(vid,front){
+  if(!vid)return;const c=ytUrlCache.get(vid);
+  if((c&&c.exp>Date.now())||ytPend.has(vid))return;
+  const i=warmQ.indexOf(vid);if(i>=0)warmQ.splice(i,1);
+  if(front)warmQ.unshift(vid);else warmQ.push(vid);warmPump();
+}
+function warmAhead(r,id){
+  const q=r.queue,i=q.indexOf(id),ids=[id,...(i<0?[]:q.slice(i+1,i+3))];
+  ids.forEach((x,k)=>{const s=catalog.get(x);if(s&&s.source==='spotify'&&s.videoId)prewarm(s.videoId,k===0)});
+}
+
+app.get('/yt-debug/:vid',async(req,res)=>{
+  const vid=req.params.vid;ytUrlCache.delete(vid);const t=Date.now();
+  try{const url=await ytDlpUrl(vid);const r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0',Range:'bytes=0-1023'}});
+    res.json({ok:r.ok||r.status===206,videoId:vid,ytDlp:'OK',googlevideoStatus:r.status,contentType:r.headers.get('content-type'),acceptRanges:r.headers.get('accept-ranges'),ms:Date.now()-t});try{r.body.cancel()}catch{}}
+  catch(e){res.status(500).json({ok:false,videoId:vid,error:e.message})}
+});
+app.get('/yt-audio/:vid',async(req,res)=>{
+  const vid=req.params.vid;if(!/^[A-Za-z0-9_-]{11}$/.test(vid))return res.sendStatus(400);
+  try{
+    let url=await ytDlpUrlOnce(vid),h={'User-Agent':'Mozilla/5.0'};if(req.headers.range)h.Range=req.headers.range;
+    let r=await fetch(url,{headers:h});
+    if(!r.ok&&r.status!==206){ytUrlCache.delete(vid);url=await ytDlpUrl(vid);r=await fetch(url,{headers:h})}
+    res.status(r.status);
+    for(const k of ['content-type','content-length','content-range','accept-ranges'])if(r.headers.get(k))res.setHeader(k,r.headers.get(k));
+    if(!r.headers.get('accept-ranges'))res.setHeader('Accept-Ranges','bytes');
+    const rs=Readable.fromWeb(r.body);rs.on('error',()=>{try{res.end()}catch{}});rs.pipe(res);
+    res.on('close',()=>{try{rs.destroy()}catch{}});
+    console.log('YT AUDIO',vid,r.status,r.headers.get('content-type'),req.headers.range||'');
+  }catch(e){console.error('YT AUDIO ERROR:',e.message);if(!res.headersSent)res.status(503).send(e.message)}
+});
+app.post('/api/youtube/resolve',express.json({limit:'1mb'}),async(req,res)=>{try{res.json(await resolveYouTube(req.body?.url||''))}catch(e){res.status(400).json({error:e.message||'Could not resolve YouTube link.'})}});
+const ytSearchCache=new Map();
+async function searchYouTubeForSong(title,artist){const query=`${title} ${artist}`.trim();if(ytSearchCache.has(query))return ytSearchCache.get(query);try{const r=await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(query+' audio')}`,{headers:{'User-Agent':'Mozilla/5.0'}});const html=await r.text();const m=html.match(/\"videoId\":\"([A-Za-z0-9_-]{11})\"/);if(m){ytSearchCache.set(query,m[1]);return m[1]}}catch(e){}return null}
+
+// ---- Spotify import (fast: parallel YouTube lookups, progressive) ----
+async function spotifyMeta(url){
+  const pm=url.match(/playlist\/([A-Za-z0-9]+)/),am=url.match(/album\/([A-Za-z0-9]+)/),tm=url.match(/track\/([A-Za-z0-9]+)/);
+  const embedUrl=pm?`https://open.spotify.com/embed/playlist/${pm[1]}`:am?`https://open.spotify.com/embed/album/${am[1]}`:tm?`https://open.spotify.com/embed/track/${tm[1]}`:null;
+  if(!embedUrl)throw new Error('Invalid Spotify link.');
+  const sr=await fetch(embedUrl,{headers:{'User-Agent':'Mozilla/5.0'}}),html=await sr.text(),nd=html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+  if(!nd)throw new Error('Spotify metadata unavailable.');
+  const entity=JSON.parse(nd[1])?.props?.pageProps?.state?.data?.entity;if(!entity)throw new Error('Spotify item could not be read.');
+  const cover=entity.coverArt?.sources?.[0]?.url||'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=400',name=entity.title||entity.name||'Spotify';
+  const raw=Array.isArray(entity.trackList)?entity.trackList.slice(0,100):[entity];
+  return {name,items:raw.map(it=>({title:it.title||entity.title||'Spotify Track',artist:it.subtitle||entity.subtitle||'Spotify Artist',duration:it.duration?Math.round(it.duration/1000):0})),cover};
+}
+async function spotifyResolveItem(it,name,cover){
+  const vid=await searchYouTubeForSong(it.title,it.artist);if(!vid)return null;
+  const song={id:'yt_'+vid,type:'youtube',source:'spotify',videoId:vid,title:it.title,artist:it.artist,album:name,artwork:cover,audio:null,duration:it.duration||0};
+  catalog.set(song.id,song);return song;
+}
+async function spotifyResolveAll(url,onBatch){
+  const meta=await spotifyMeta(url),out=[];
+  // first playable track alone (so playback can start immediately), then the rest 10 at a time in parallel
+  let i=0;
+  for(;i<meta.items.length;i++){const t=await spotifyResolveItem(meta.items[i],meta.name,meta.cover);if(t){out.push(t);if(onBatch)await onBatch([t],true);i++;break}}
+  for(;i<meta.items.length;i+=10){
+    const got=(await Promise.all(meta.items.slice(i,i+10).map(it=>spotifyResolveItem(it,meta.name,meta.cover).catch(()=>null)))).filter(Boolean);
+    out.push(...got);if(got.length&&onBatch)await onBatch(got,false);
+  }
+  if(!out.length)throw new Error('No playable tracks could be resolved from Spotify.');
+  return {type:out.length>1?'playlist':'track',playlistName:meta.name,tracks:out};
+}
+app.post('/api/spotify/resolve',express.json({limit:'1mb'}),async(req,res)=>{try{res.json(await spotifyResolveAll(String(req.body?.url||'')))}catch(e){res.status(400).json({error:e.message||'Could not resolve Spotify URL.'})}});
+
 
 const server=http.createServer(app);
 const wss=new WebSocketServer({server,path:'/ws',maxPayload:16384,perMessageDeflate:false});
@@ -186,7 +187,7 @@ const snap=(r,full)=>{
   const o={
     roomId:r.id,songId:r.s.songId,song:pub(catalog.get(r.s.songId)),state:r.s.state,
     position:pos(r),serverTime:Date.now(),queue:r.queue,repeat:r.repeat,
-    devices:r.members.size,commanderOnline:!!r.cmd,qv:r.qv
+    devices:r.members.size,commanderOnline:!!r.cmd,qv:r.qv,amb:!!r.amb
   };
   if(full){
     o.qs=r.queue.map(id=>pub(catalog.get(id))).filter(Boolean);
@@ -214,24 +215,17 @@ function soon(r){
 
 function setSong(r,id,play){
   if(!catalog.has(id))return false;
-  r.s={songId:id,state:play?'playing':'paused',position:0,ts:Date.now()};
+  clearTimeout(r.lt);
+  const gate=!!play&&!!catalog.get(id).videoId;
+  r.s={songId:id,state:play?(gate?'loading':'playing'):'paused',position:0,ts:Date.now()};
+  if(gate)r.lt=setTimeout(()=>{if(rooms.has(r.id)&&r.s.songId===id&&r.s.state==='loading'){r.s={...r.s,state:'playing',position:0,ts:Date.now()};bcast(r)}},12000);
+  warmAhead(r,id);
   return true;
 }
-function addQ(r,id){
-  if(r.queue.includes(id))return true;
-  if(r.queue.length>=MAX_QUEUE)return false;
-  r.queue.push(id);r.qv++;
-  return true;
-}
-
-function step(r,d){
-  const q=r.queue;
-  if(!q.length)return;
-  const n=q.indexOf(r.s.songId)+d;
-  if(n<0)return setSong(r,q[0],true);
-  if(n<q.length)return setSong(r,q[n],true);
-  setSong(r,q[0],r.repeat==='all');
-}
+function step(r,d){const q=r.queue;if(!q.length)return;const i=q.indexOf(r.s.songId);let n=i+d;if(n>=q.length){if(r.repeat==='all')n=0;else{r.s={...r.s,state:'paused',position:0,ts:Date.now()};return}}if(n<0)n=r.repeat==='all'?q.length-1:0;setSong(r,q[n],true)}
+function addQ(r,id){if(r.queue.includes(id))return true;if(r.queue.length>=MAX_QUEUE)return false;r.queue.push(id);r.qv++;return true}
+function addSongsToRoom(r,tracks,play,quiet){for(const raw of tracks){const song={...raw,type:'youtube',source:raw.source==='spotify'?'spotify':'youtube',audio:null};catalog.set(song.id,song);r.yt.set(song.id,song);addQ(r,song.id)}if(play&&tracks[0])setSong(r,tracks[0].id,true);else if(!r.s.songId&&tracks[0])setSong(r,tracks[0].id,false);r.qv++;if(quiet&&!play)soon(r);else bcast(r);if(!quiet)notice(r,play?`Starting ${tracks.length>1?'playlist':'playback'}...`:`Added ${tracks.length} track${tracks.length===1?'':'s'} to queue.`)}
+async function ytRoom(r,url,play){r.pend++;try{const result=await resolveYouTube(url);if(rooms.has(r.id))addSongsToRoom(r,result.tracks,play)}catch(e){console.error('YOUTUBE RESOLVE ERROR:',e.message||e);if(rooms.has(r.id))notice(r,e.message||'Could not resolve this YouTube link.')}finally{r.pend--}}
 
 function leave(ws){
   const r=ws.room;
@@ -247,158 +241,8 @@ function endRoom(r){
   rooms.delete(r.id);
   r.members.clear();
   r.yt.clear();
-  clearTimeout(r.bt);
+  clearTimeout(r.bt);clearTimeout(r.lt);
 }
-
-let active=0;
-const waitq=[],dl=new Map();
-
-const slot=(priority='normal')=>new Promise(res=>{
-  const go=()=>{
-    active++;
-    res();
-  };
-
-  if(active<MAX_DL){
-    go();
-    return;
-  }
-
-  const job={go,priority};
-
-  if(priority==='high'){
-    const i=waitq.findIndex(x=>x.priority!=='high');
-    if(i===-1) waitq.push(job);
-    else waitq.splice(i,0,job);
-  }else{
-    waitq.push(job);
-  }
-});
-
-const free=()=>{
-  active--;
-  const i=waitq.findIndex(x=>x.priority==='high');
-  const job=i===-1?waitq.shift():waitq.splice(i,1)[0];
-  if(job)job.go();
-};
-function fetchYT(vid,priority='normal'){
-  const id='yt_'+vid;
-
-  if(dl.has(vid))return dl.get(vid);
-
-  const cached=ytc.get(id);
-  if(cached&&ytStreams.has(id)){
-    cached.used=Date.now();
-    saveYT();
-    return Promise.resolve(cached);
-  }
-
-  const p=(async()=>{
-  await slot(priority);
-
-  try{
-    const args=[
-      '--no-playlist',
-      '--no-warnings',
-      '--no-progress',
-      '--js-runtimes','node',
-      '-f','140/bestaudio[ext=m4a]/bestaudio',
-      '-J',
-      'https://www.youtube.com/watch?v='+vid
-    ];
-
-    if(fs.existsSync('/tmp/cookies.txt')){
-      args.splice(7,0,'--cookies','/tmp/cookies.txt');
-    }
-
-    const out=await new Promise((ok,bad)=>
-      execFile(
-        YTDLP,
-        args,
-        {maxBuffer:1<<26,timeout:60e3},
-        (e,so,se)=>e?bad(Object.assign(e,{stderr:String(se||'')})):ok(String(so))
-      )
-    );
-
-    const lines=out.trim().split('\n').filter(Boolean);
-    const j=JSON.parse(lines[lines.length-1]);
-
-    const playableUrl=j.url||(
-  Array.isArray(j.formats)
-    ?j.formats.find(f=>f.url&&(
-        f.format_id==='140' ||
-        f.ext==='m4a' ||
-        String(f.mime_type||'').startsWith('audio/')
-      ))?.url
-    :null
-);
-
-if(!playableUrl)throw new Error('No playable YouTube URL found.');
-
-    ytStreams.set(id,{
-      url:playableUrl,
-      headers:j.http_headers||{},
-      expires:Date.now()+2*60*60*1000
-    });
-
-    const song={
-      id,
-      type:'local',
-      title:j.title||'YouTube Audio',
-      artist:j.uploader||j.channel||'YouTube',
-      album:'YouTube',
-      artwork:`https://i.ytimg.com/vi/${vid}/hqdefault.jpg`,
-      audio:`/api/ytstream/${id}`,
-      duration:Number(j.duration)||0,
-      used:Date.now()
-    };
-
-    ytc.set(id,song);
-    catalog.set(id,song);
-    saveYT();
-
-    return song;
-        }finally{
-      free();
-    }
-  })().finally(()=>dl.delete(vid));
-
-  dl.set(vid,p);
-  return p;
-}
-
-async function ytRoom(r,vid,play){
-  const id='yt_'+vid;
-  r.pend++;
-  try{
-    const song=await fetchYT(vid,play?'high':'normal');
-    if(!rooms.has(r.id))return;
-    r.yt.set(id,song);r.qv++;
-    addQ(r,id);
-    if(play)setSong(r,id,true);
-    else if(!r.s.songId)setSong(r,id,false);
-    notice(r,play?'Starting playback...':'Added to queue.');
-  }catch(e){
-    console.error('YT-DLP ERROR:',e.message||e);
-    if(rooms.has(r.id))notice(r,e.code==='ENOENT'?'yt-dlp is not installed on the server PC.':'Could not download this video. Check the link and try again.');
-  }finally{r.pend--}
-  if(rooms.has(r.id))bcast(r);
-}
-
-function cleanCache(){
-  const t=Date.now(),inUse=new Set();
-  rooms.forEach(r=>r.yt.forEach((_,id)=>inUse.add(id)));
-  [...ytc.values()].sort((a,b)=>b.used-a.used).forEach((s,i)=>{
-    if(inUse.has(s.id))return;
-    if(t-s.used>CACHE_DAYS*864e5||i>=CACHE_MAX){
-      fs.unlink(path.join(CACHE,path.basename(s.audio)),()=>{});
-      ytc.delete(s.id);catalog.delete(s.id);
-    }
-  });
-  saveYT();
-}
-cleanCache();
-setInterval(cleanCache,3600e3);
 
 const allowed=['.mp3','.m4a','.aac','.ogg','.oga','.wav','.webm','.mp4','.m4v','.ogv'];
 
@@ -439,12 +283,15 @@ app.post('/api/upload',(req,res)=>{
   req.pipe(out);
 });
 
+const qrCache=new Map();
 app.get('/api/qr/:id',async(req,res)=>{
   const id=String(req.params.id||'').toUpperCase();
   if(!rooms.has(id))return res.status(404).json({error:'Room not found'});
   const url=`${req.protocol}://${req.get('host')}/join/${id}`;
   try{
+    if(qrCache.has(url))return res.json({ok:true,url,dataUrl:qrCache.get(url)});
     const dataUrl=await QRCode.toDataURL(url,{width:260,margin:2,errorCorrectionLevel:'M'});
+    if(qrCache.size>100)qrCache.clear();qrCache.set(url,dataUrl);
     res.json({ok:true,url,dataUrl});
   }catch(e){
     console.error('QR ERROR:',e);
@@ -468,20 +315,16 @@ wss.on('connection',ws=>{
       const uid=String(m.uid||'');
       if(!/^[a-f0-9]{16,64}$/.test(uid))return err(ws,'Missing device id.');
       leave(ws);
+      if(rooms.size>=MAX_ROOMS)return err(ws,'Server is busy: 20 rooms are already active. Try again in a few minutes.');
       let claimed=false;
       uploaded.forEach(s=>{if(!s.owner){s.owner=uid;claimed=true}});
       if(claimed)saveUploads();
       const r={
-        token:
-  crypto
-    .randomBytes(24)
-    .toString('hex'),
-
-expiresAt:
-  Date.now()+ROOM_LIFETIME,
-
-cmd:
-  ws,
+        id:newId(),
+        owner:uid,
+        token:crypto.randomBytes(24).toString('hex'),
+        expiresAt:Date.now()+ROOM_LIFETIME,
+        cmd:ws,
         queue:[],yt:new Map(),members:new Set([ws]),repeat:'off',tick:0,seen:Date.now(),qv:0,sentQv:0,pend:0,bt:null,
         s:{songId:null,state:'paused',position:0,ts:Date.now()}
       };
@@ -494,7 +337,7 @@ cmd:
     if(m.type==='ROOM_JOIN'){
       const r=rooms.get(String(m.roomId||'').trim().toUpperCase());
       if(!r)return err(ws,'Room not found. Check the code and try again.');
-      if(r.members.size>=MAX_MEMBERS)return err(ws,'This room is full.');
+      if(r.members.size>=MAX_MEMBERS)return err(ws,'This room is full (40 devices max).');
       leave(ws);
       const isCmd=!!(m.token&&tokEq(m.token,r.token));
       if(isCmd)r.cmd=ws;
@@ -517,6 +360,17 @@ cmd:
       return endRoom(r);
     }
 
+    // everyone may ADD songs to the queue; only the Commander may play
+    if(m.type==='YOUTUBE_ADD'||m.type==='SPOTIFY_ADD'){
+      const u=String(m.url||'').trim().slice(0,300),pl=ws.role==='commander'&&r.cmd===ws&&m.play!==false;
+      if(!u)return err(ws,m.type==='YOUTUBE_ADD'?'Paste a YouTube link.':'Paste a Spotify link.');
+      if(r.pend>=4)return err(ws,'Busy importing. Try again in a moment.');
+      if(m.type==='YOUTUBE_ADD'){ytRoom(r,u,pl);return}
+      (async()=>{r.pend++;let n=0;try{
+        const res=await spotifyResolveAll(u,async(tr,first)=>{if(!rooms.has(r.id))return;n+=tr.length;addSongsToRoom(r,tr,first&&pl,true);if(first)notice(r,pl?'Spotify: playing first song, loading the rest...':'Spotify: adding songs...')});
+        if(rooms.has(r.id))notice(r,`Spotify: added ${n} song${n===1?'':'s'} from "${res.playlistName}".`);
+      }catch(e){if(rooms.has(r.id))notice(r,e.message||'Could not import Spotify link.')}finally{r.pend--}})();return;
+    }
     if(ws.role!=='commander'||r.cmd!==ws)return err(ws,'Only the Commander can control playback.');
 
     const s=r.s;
@@ -530,6 +384,11 @@ cmd:
       return;
     }
 
+    if(m.type==='AUDIO_READY'){
+      if(s.state==='loading'&&m.id===s.songId){clearTimeout(r.lt);r.s={...s,state:'playing',position:0,ts:Date.now()};bcast(r)}
+      return;
+    }
+
     if(m.type==='ENDED'){
       if(m.id===s.songId&&s.state==='playing'&&pos(r)>2){
         if(r.repeat==='one')setSong(r,s.songId,true);else step(r,1);
@@ -538,18 +397,9 @@ cmd:
       return;
     }
 
-    if(m.type==='YOUTUBE_PREPARE'){
-      const vid=ytId(m.url);
-      if(!vid)return;
-      fetchYT(vid,'high').catch(()=>{});
-      return;
-    }
-
-    if(m.type==='YOUTUBE_ADD'){
-      const vid=ytId(m.url);
-      if(!vid)return err(ws,'Invalid YouTube link.');
-      ytRoom(r,vid,m.play!==false);
-      return;
+    if(m.type==='PL_ADD'){
+      const list=(Array.isArray(m.tracks)?m.tracks:[]).slice(0,200).filter(t=>t&&/^[A-Za-z0-9_-]{11}$/.test(t.videoId)).map(t=>({id:'yt_'+t.videoId,type:'youtube',source:t.source==='spotify'?'spotify':'youtube',videoId:t.videoId,title:String(t.title||'YouTube').slice(0,200),artist:String(t.artist||'YouTube').slice(0,200),album:t.source==='spotify'?'Spotify':'YouTube',artwork:String(t.artwork||`https://i.ytimg.com/vi/${t.videoId}/hqdefault.jpg`).slice(0,500),audio:null,duration:0}));
+      if(!list.length)return;for(const x of list)catalog.set(x.id,x);addSongsToRoom(r,list,m.play!==false);return;
     }
 
     switch(m.type){
@@ -601,6 +451,7 @@ cmd:
           r.queue=[...new Set(m.queue)];r.qv++;
         }
         break;
+      case 'AMBIENT':r.amb=!!m.on;break;
       default:return;
     }
     bcast(r);
@@ -614,6 +465,7 @@ setInterval(()=>{
   const t=Date.now();
   rooms.forEach(r=>{
     if(r.expiresAt&&t>=r.expiresAt)return endRoom(r);
+    if(!r.members.size){if(!r.emptyAt)r.emptyAt=t;else if(t-r.emptyAt>15*60*1000)return endRoom(r);return}else r.emptyAt=0;
     const song=r.s.songId&&catalog.get(r.s.songId);
     if(song&&song.duration>0&&r.s.state==='playing'&&pos(r)>=song.duration){
       if(r.repeat==='one')setSong(r,r.s.songId,true);else step(r,1);
