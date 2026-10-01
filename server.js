@@ -1,7 +1,7 @@
 const express=require('express'),http=require('http'),{WebSocketServer}=require('ws'),crypto=require('crypto'),fs=require('fs'),path=require('path'),os=require('os'),QRCode=require('qrcode');
 const D=__dirname,PORT=process.env.PORT||3000,MUSIC=process.env.MUSIC_DIR||path.join(D,'music'),UP=path.join(MUSIC,'uploads');
 const UPDB=path.join(MUSIC,'uploads.json'),LIBDB=path.join(MUSIC,'library.json');
-const MAX_UPLOAD=250*1024*1024,MAX_QUEUE=200,ROOM_LIFETIME=9*60*60*1000,MAX_MEMBERS=40,MAX_ROOMS=20;
+const MAX_UPLOAD=250*1024*1024,MAX_QUEUE=200,ROOM_LIFETIME=9*60*60*1000,MAX_MEMBERS=1000,MAX_ROOMS=50;
 fs.mkdirSync(UP,{recursive:true});
 process.on('uncaughtException',e=>console.error('UNCAUGHT:',e));
 process.on('unhandledRejection',e=>console.error('UNHANDLED:',e));
@@ -315,7 +315,7 @@ wss.on('connection',ws=>{
       const uid=String(m.uid||'');
       if(!/^[a-f0-9]{16,64}$/.test(uid))return err(ws,'Missing device id.');
       leave(ws);
-      if(rooms.size>=MAX_ROOMS)return err(ws,'Server is busy: 20 rooms are already active. Try again in a few minutes.');
+      if(rooms.size>=MAX_ROOMS)return err(ws,'Server is busy: 50 rooms are already active. Try again in a few minutes.');
       let claimed=false;
       uploaded.forEach(s=>{if(!s.owner){s.owner=uid;claimed=true}});
       if(claimed)saveUploads();
@@ -337,7 +337,7 @@ wss.on('connection',ws=>{
     if(m.type==='ROOM_JOIN'){
       const r=rooms.get(String(m.roomId||'').trim().toUpperCase());
       if(!r)return err(ws,'Room not found. Check the code and try again.');
-      if(r.members.size>=MAX_MEMBERS)return err(ws,'This room is full (40 devices max).');
+      if(r.members.size>=MAX_MEMBERS)return err(ws,'This room is full (1000 devices max).');
       leave(ws);
       const isCmd=!!(m.token&&tokEq(m.token,r.token));
       if(isCmd)r.cmd=ws;
@@ -483,6 +483,9 @@ setInterval(()=>{
   });
 },15000);
 
+const SELF=process.env.RENDER_EXTERNAL_URL||'https://clg-fest-jugard.onrender.com';
+setInterval(()=>{fetch(SELF+'/ping-keepalive').catch(()=>{})},10*60*1000);
+app.get('/ping-keepalive',(_,res)=>res.send('ok'));
 server.keepAliveTimeout=65000;
 server.headersTimeout=66000;
 server.requestTimeout=0;

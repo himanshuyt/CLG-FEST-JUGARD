@@ -13,7 +13,7 @@ body{margin:0;background:radial-gradient(900px 500px at 50% -10%,#3b1560,var(--b
 header{display:flex;justify-content:space-between;align-items:center;padding:18px 0}
 header b{font-weight:800;letter-spacing:.18em;font-size:20px}
 header i{color:var(--ac);font-style:normal}
-.card{background:#ffffff0d;border:1px solid #ffffff1a;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-radius:22px;padding:20px;margin:14px 0;text-align:center}
+.card{background:#ffffff0d;border:1px solid #ffffff1a;border-radius:22px;padding:20px;margin:14px 0;text-align:center}
 h1{margin:14px 0 4px;font-size:26px;text-align:center;word-break:break-word}
 h2{margin:0 0 12px;font-size:20px}
 .lbl{color:var(--mu);font-size:13px}
@@ -112,10 +112,9 @@ header b i{color:transparent}
 .brand{width:fit-content;margin:0 auto;font:900 clamp(24px,6.5vw,40px)/1.1 system-ui,sans-serif;letter-spacing:.07em;filter:drop-shadow(0 3px 14px #ff4d8d55)}
 .presents{width:fit-content;margin:2px auto 10px;font:700 10px/1 system-ui,sans-serif;letter-spacing:.55em;padding-left:.55em;text-transform:uppercase}
 #st{scroll-margin-top:12px}
-#amb{position:fixed;inset:0;opacity:0;transition:opacity .8s;pointer-events:none;z-index:0;background:radial-gradient(45vmax 45vmax at 20% 25%,#ff4d8dcc,transparent 65%),radial-gradient(50vmax 50vmax at 82% 20%,#8b5cf6bb,transparent 65%),radial-gradient(55vmax 55vmax at 55% 92%,#ffb84daa,transparent 65%);background-size:150% 150%;animation:ambm 9s ease-in-out infinite alternate,ambg 3.2s ease-in-out infinite alternate}
-body.amb #amb{opacity:.9}
-@keyframes ambm{0%{background-position:0% 0%,100% 0%,50% 100%}100%{background-position:100% 100%,0% 100%,50% 0%}}
-@keyframes ambg{0%{box-shadow:inset 0 0 90px #ff4d8d55}100%{box-shadow:inset 0 0 170px #8b5cf6aa}}
+#amb{position:fixed;inset:0;opacity:0;transition:opacity .8s;pointer-events:none;z-index:0;background:radial-gradient(55vmax 55vmax at 20% 25%,#ff4d8d,transparent 70%),radial-gradient(60vmax 60vmax at 82% 20%,#a78bfa,transparent 70%),radial-gradient(65vmax 65vmax at 55% 92%,#ffc94d,transparent 70%),radial-gradient(45vmax 45vmax at 90% 85%,#22d3ee,transparent 70%);background-size:160% 160%;mix-blend-mode:screen;filter:saturate(1.4) brightness(1.25);animation:ambm 7s ease-in-out infinite alternate;will-change:background-position}
+body.amb #amb{opacity:1}
+@keyframes ambm{0%{background-position:0% 0%,100% 0%,50% 100%,100% 100%}100%{background-position:100% 100%,0% 100%,50% 0%,0% 0%}}
 #plm{position:fixed;inset:0;z-index:9999;background:#000a;display:flex;align-items:center;justify-content:center;padding:16px}
 .plb{width:100%;max-width:380px;background:#1d1030;border:1px solid #ffffff22;border-radius:20px;padding:18px}
 .plb h2{margin:0 0 4px}.pll{margin:12px 0;max-height:240px;overflow-y:auto;display:grid;gap:8px}
@@ -159,6 +158,7 @@ function setupAudioBoost(){
     gainNode.gain.value=boost;
   }catch(e){console.warn('Audio boost unavailable:',e)}
 }
+function nudge(d){setAdj(Math.round((syncAdj+d)*10)/10);const s=$('#adjS');if(s)s.value=syncAdj}
 function setAdj(v){syncAdj=Number(v)||0;try{localStorage.syncAdj=syncAdj}catch{}const e=$('#adjV');if(e)e.textContent=(syncAdj>0?'+':'')+syncAdj.toFixed(2)+'s'}
 function setBoost(v){
   boost=Number(v);
@@ -246,8 +246,8 @@ function syncYouTube(song,target,playing,hold){
         if(audioOn&&(ps===-1||ps===P.PAUSED||ps===P.CUED)){try{if(ytPlayer.isMuted())ytPlayer.unMute()}catch{}ytPlayer.playVideo()}
         else if(playing&&ps===P.PLAYING){
           const drift=Number(ytPlayer.getCurrentTime()||0)-target,a=Math.abs(drift);
-          if(a>0.9&&now()-lastSeek>3000){lastSeek=now();ytSeekAt=now();ytRate=1;try{ytPlayer.setPlaybackRate(1)}catch{}ytPlayer.seekTo(Math.max(0,target+ytLat),true)}
-          else{const r=a>(ytRate!==1?0.1:0.3)?(drift<0?1.25:0.75):1;if(r!==ytRate){ytRate=r;try{ytPlayer.setPlaybackRate(r)}catch{}}}
+          if(a>0.6&&now()-lastSeek>2500){lastSeek=now();ytSeekAt=now();ytRate=1;try{ytPlayer.setPlaybackRate(1)}catch{}ytPlayer.seekTo(Math.max(0,target+ytLat),true)}
+          else{const r=a>(ytRate!==1?0.06:0.15)?(drift<0?1.25:0.75):1;if(r!==ytRate){ytRate=r;try{ytPlayer.setPlaybackRate(r)}catch{}}}
         }
       }else if(ps===P.PLAYING||ps===P.BUFFERING)ytPlayer.pauseVideo();
     }catch(e){}
@@ -387,7 +387,7 @@ const chooseFiles=()=>pick(false),chooseFolder=()=>pick(true);
 const jm=location.pathname.match(/^\/join\/([A-Za-z0-9]{6})/);
 
 if(jm){roomId=jm[1].toUpperCase();view='join';pending={type:'ROOM_JOIN',roomId};connect()}
-else loadSongs();
+else{loadSongs();connect()}
 function getRoomHistory(){
   try{
     return JSON.parse(localStorage.getItem('srHistory') || '[]');
@@ -480,7 +480,7 @@ function connect(){
 }
 
 const ping=()=>tx({type:'TIME_PING',t0:now()});
-setInterval(()=>{if(conn==='connected')ping()},5000);
+setInterval(()=>{if(conn==='connected')ping()},3000);
 
 function onMsg(m){
   switch(m.type){
@@ -488,7 +488,7 @@ function onMsg(m){
       const t1=now(),r=t1-m.t0;
       if(!isFinite(r)||!isFinite(m.ts))break;
       samples.push({r,o:m.ts+r/2-t1});
-      samples=samples.slice(-10);
+      samples=samples.slice(-16);
       offset=samples.reduce((a,c)=>c.r<a.r?c:a).o;
       rtt=r;
       break;
@@ -645,7 +645,7 @@ function tick(){
     if(role==='commander'&&isFinite(au.duration)&&au.duration>0&&loaded===song.id&&Math.abs((song.duration||0)-au.duration)>0.5&&now()-lastDur>3000){lastDur=now();cmd('LOCAL_DURATION_UPDATE',{id:song.id,duration:au.duration})}
     if(s.state==='loading'&&role==='commander'&&loaded===song.id&&au.readyState>=3&&now()-lastReady>700){lastReady=now();cmd('AUDIO_READY',{id:song.id})}
     if(loaded!==song.id){au.pause();au.src=song.audio||(song.videoId?'/yt-audio/'+song.videoId:'');au.load();loaded=song.id;setBoost(boost)}
-    if(playing){if(au.paused&&audioOn)au.play().catch(e=>{if(now()-(window.__pe||0)>3000){window.__pe=now();dbg('au.play() blocked: '+e.name+' '+e.message)}});const d=au.currentTime-tgt,a=Math.abs(d);drift=d;if(a>0.8&&now()-lastSeek>2000&&!au.seeking){try{au.currentTime=tgt+seekLat;seekAt=now()}catch{}lastSeek=now();au.playbackRate=1}else if(a>0.06)au.playbackRate=1-Math.max(-0.1,Math.min(0.1,d*0.5));else au.playbackRate=1;synced=a<0.25}else{if(!au.paused)au.pause();au.playbackRate=1;if(Math.abs(au.currentTime-tgt)>0.05){try{au.currentTime=tgt}catch{}}synced=true}
+    if(playing){if(au.paused&&audioOn)au.play().catch(e=>{if(now()-(window.__pe||0)>3000){window.__pe=now();dbg('au.play() blocked: '+e.name+' '+e.message)}});const d=au.currentTime-tgt,a=Math.abs(d);drift=d;if(a>0.4&&now()-lastSeek>1500&&!au.seeking){try{au.currentTime=tgt+seekLat;seekAt=now()}catch{}lastSeek=now();au.playbackRate=1}else if(a>0.06)au.playbackRate=1-Math.max(-0.1,Math.min(0.1,d*0.5));else au.playbackRate=1;synced=a<0.25}else{if(!au.paused)au.pause();au.playbackRate=1;if(Math.abs(au.currentTime-tgt)>0.05){try{au.currentTime=tgt}catch{}}synced=true}
   }
   const cur=$('#cur');if(cur)cur.textContent=fmt(tgt);const bar=$('#bar');if(bar&&!dragging){if(song.duration>0)bar.max=song.duration;bar.value=tgt}const pb=$('#pb');if(pb&&song.duration>0)pb.style.width=(100*tgt/song.duration)+'%';const st=$('#st');if(st){const h=status();if(h!==lastStatus){lastStatus=h;st.innerHTML=h}}preload();
 }
@@ -739,7 +739,7 @@ function volumeCard(label){
     <input type="range" min="1" max="2.5" step="0.1" value="${boost}" oninput="setBoost(this.value)">
     <div style="margin-top:4px">Boost: <span id="boostValue" class="boost-value">${boost.toFixed(1)}×</span></div>
     <div class="lbl" style="margin-top:14px">Sync fine-tune (this device): <span id="adjV" class="boost-value">${syncAdj>0?'+':''}${syncAdj.toFixed(2)}s</span></div>
-    <input type="range" min="-2" max="2" step="0.05" value="${syncAdj}" oninput="setAdj(this.value)">
+    <input id="adjS" type="range" min="-2" max="2" step="0.05" value="${syncAdj}" oninput="setAdj(this.value)"><div class="two" style="margin-top:8px"><button class="small" onclick="nudge(-0.1)">⏪ Backward 0.1s</button><button class="small" onclick="nudge(0.1)">Forward 0.1s ⏩</button></div>
     <div class="lbl">+ plays earlier · − plays later</div>
     ${role==='commander'?`<button style="margin-top:12px;width:100%" onclick="cmd('AMBIENT',{on:${!snap.amb}})">💡 Ambience light: ${snap.amb?'ON':'OFF'}</button>`:''}
   </section>`;
