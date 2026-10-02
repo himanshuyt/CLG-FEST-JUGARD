@@ -59,6 +59,11 @@ app.use('/vendor',express.static(path.join(D,'node_modules/qrcode/build'),{maxAg
 app.use(express.static(path.join(D,'public'),{maxAge:0}));
 app.get('/join/:id',(_,res)=>res.sendFile(path.join(D,'public','index.html')));
 
+const STATS_F=path.join(__dirname,'stats.json');let ST={visits:0,rooms:0,joins:0};
+try{ST={...ST,...JSON.parse(fs.readFileSync(STATS_F,'utf8'))}}catch{}
+let stDirty=false;setInterval(()=>{if(stDirty){stDirty=false;fs.writeFile(STATS_F,JSON.stringify(ST),()=>{})}},30000);
+const bump=k=>{ST[k]++;stDirty=true};
+app.get('/api/stats',(req,res)=>{if(req.query.visit)bump('visits');res.set('Cache-Control','no-store');res.json({...ST,live:wss.clients.size})});
 app.get('/api/songs',(req,res)=>{
   const uid=getUid(req);
   res.set('Cache-Control','no-store');
@@ -312,7 +317,7 @@ wss.on('connection',ws=>{
 
     if(m.type==='TIME_PING')return send(ws,{type:'TIME_PONG',t0:m.t0,ts:Date.now()});
 
-    if(m.type==='ROOM_CREATE'){
+    if(m.type==='ROOM_CREATE'){bump('rooms');
       const uid=String(m.uid||'');
       if(!/^[a-f0-9]{16,64}$/.test(uid))return err(ws,'Missing device id.');
       leave(ws);
@@ -335,7 +340,7 @@ wss.on('connection',ws=>{
       return send(ws,{type:'SYNC_RESPONSE',state:snap(r,true)});
     }
 
-    if(m.type==='ROOM_JOIN'){
+    if(m.type==='ROOM_JOIN'){bump('joins');
       const r=rooms.get(String(m.roomId||'').trim().toUpperCase());
       if(!r)return err(ws,'Room not found. Check the code and try again.');
       if(r.members.size>=MAX_MEMBERS)return err(ws,'This room is full (1000 devices max).');

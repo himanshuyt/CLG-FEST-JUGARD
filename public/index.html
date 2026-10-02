@@ -117,8 +117,8 @@ input#ytUrl,input#spotifyUrl{width:100%;min-width:0;min-height:48px;border-radiu
 @keyframes shine{0%{background-position:150% 0}100%{background-position:-50% 0}}
 .brand,.presents,header b{background:linear-gradient(110deg,var(--ac) 0%,var(--am) 34%,#fff 47%,#fff4c2 53%,var(--am) 66%,var(--ac) 100%);background-size:250% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:shine 3.2s linear infinite;user-select:none}
 header b i{color:transparent}
-.brand{width:fit-content;margin:0 auto;font:900 clamp(24px,6.5vw,40px)/1.1 system-ui,sans-serif;letter-spacing:.07em;filter:drop-shadow(0 3px 14px #ff4d8d55)}
-.presents{width:fit-content;margin:2px auto 10px;font:700 10px/1 system-ui,sans-serif;letter-spacing:.55em;padding-left:.55em;text-transform:uppercase}
+.brand{width:fit-content;margin:0 auto;font:900 clamp(34px,10vw,58px)/1.05 system-ui,sans-serif;letter-spacing:.07em;filter:drop-shadow(0 3px 14px #ff4d8d55)}
+.presents{width:fit-content;margin:2px auto 10px;font:700 12px/1 system-ui,sans-serif;letter-spacing:.6em;padding-left:.6em;text-transform:uppercase}
 #st{scroll-margin-top:12px}
 #amb{position:fixed;inset:0;opacity:0;transition:opacity .12s linear;pointer-events:none;z-index:0;background:radial-gradient(55vmax 55vmax at 20% 25%,#ff2f86,transparent 70%),radial-gradient(60vmax 60vmax at 82% 20%,#9b6bff,transparent 70%),radial-gradient(65vmax 65vmax at 55% 92%,#ffc94d,transparent 70%),radial-gradient(45vmax 45vmax at 90% 85%,#19e0ff,transparent 70%);background-size:160% 160%;animation:ambm 7s ease-in-out infinite alternate;will-change:opacity,transform}
 body.amb #amb{opacity:.6}
@@ -230,6 +230,9 @@ function fixAudio(p){
   }catch{}
 }
 ['pointerdown','keydown','touchstart'].forEach(ev=>document.addEventListener(ev,()=>{if(ytPlayer)fixAudio(ytPlayer)},{passive:true}));
+let stats={visits:0,rooms:0,joins:0,live:0};
+(function(){const first=!sessionStorage.getItem('v');try{sessionStorage.setItem('v','1')}catch{}
+fetch('/api/stats'+(first?'?visit=1':'')).then(r=>r.json()).then(s=>{stats=s;const l=document.getElementById('liveN');if(l)l.textContent=s.live;const e=document.getElementById('bigN');if(e){const t0=performance.now(),to=s.visits;(function f(t){const k=Math.min(1,(t-t0)/1200);e.textContent=Math.round(to*(1-Math.pow(1-k,3))).toLocaleString();if(k<1)requestAnimationFrame(f)})(t0)}}).catch(()=>{})})();
 const dbgLog=[];function dbg(m){dbgLog.push(new Date().toLocaleTimeString()+'  '+m);if(dbgLog.length>40)dbgLog.shift()}
 window.addEventListener('error',e=>dbg('JS ERROR: '+e.message));window.addEventListener('unhandledrejection',e=>dbg('PROMISE: '+(e.reason&&e.reason.message||e.reason)));
 let ytGate=0,ytStartAt=0,ytPlayedOnce=false;const ytFB=new Set(),spEmbed=new Set(),useYT=s=>!!(s&&s.videoId&&!ytFB.has(s.videoId));
@@ -437,7 +440,7 @@ function saveRoomHistory(roomId,token){
 
   localStorage.setItem(
     'srHistory',
-    JSON.stringify(history.slice(0,10))
+    JSON.stringify(history.slice(0,3))
   );
 }
 
@@ -769,7 +772,7 @@ function queue(){
   </section>`;
 }
 
-const HEADER=r=>`<header><b>SYNC<i>ROOM</i></b>${r?`<span class="lbl">${r}</span>`:''}</header><div class="brand">XENBERG</div><div class="presents">Presents</div><div onclick="toggleDbg()" style="text-align:center;font-size:11px;opacity:.55;margin-top:4px;cursor:pointer;text-decoration:underline">build 9 · tap for debug</div>`;
+const HEADER=r=>`<header><div style="text-align:left"><b onclick="logoTap()">SYNC<i>ROOM</i></b><div onclick="toggleDbg()" style="font-size:11px;opacity:.6;margin-top:3px;cursor:pointer;text-decoration:underline">build 9 · tap for debug</div></div>${r?`<span class="lbl">${r}</span>`:''}</header><div class="brand">XENBERG</div><div class="presents">Presents</div>`;
 
 function volumeCard(label){
   return `<section class="card">
@@ -856,7 +859,7 @@ function room(){
 function draw(){
   lastStatus='';
   if(view==='home'){
-  const history=getRoomHistory();
+  const history=getRoomHistory().slice(0,3);
 
   app.innerHTML=HEADER('')+`
     <section class="card">
@@ -945,6 +948,12 @@ function draw(){
       `
       : ''
     }
+    <section style="text-align:center;padding:30px 10px 18px">
+      <div class="lbl" style="letter-spacing:.35em;text-transform:uppercase;font-size:11px">the vibe count</div>
+      <div id="bigN" class="brand" style="font-size:clamp(54px,16vw,96px);margin:6px auto;font-variant-numeric:tabular-nums">${stats.visits.toLocaleString()}</div>
+      <div style="font-size:15px;opacity:.85">people have vibed here 🎧</div>
+      <div style="display:inline-flex;align-items:center;gap:8px;margin-top:14px;padding:6px 14px;border-radius:99px;background:#ffffff0d;border:1px solid #ffffff1a;font-size:13px"><span style="width:8px;height:8px;border-radius:50%;background:#3dff8b;box-shadow:0 0 10px #3dff8b"></span><span id="liveN">${stats.live}</span>&nbsp;listening live</div>
+    </section>
   `;
 
   return;
@@ -977,7 +986,8 @@ draw();
 
 
 // ---- Debug panel (tap "build 9" under Presents) ----
-let dbgOn=false,dbgEl=null,dbgT=null;
+let dbgOn=false,dbgEl=null,dbgT=null,taps=0,tapT=0;
+function logoTap(){const n=Date.now();taps=n-tapT<1200?taps+1:1;tapT=n;if(taps>=5){taps=0;toggleDbg()}}
 function dbgText(){
   const sg=snap&&(snap.snapSong||snap.song),L=[];
   const yt=sg?useYT(sg):false;let ps='-';try{if(ytPlayer&&ytPlayer.getPlayerState)ps=ytPlayer.getPlayerState()}catch{}
