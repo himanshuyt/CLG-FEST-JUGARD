@@ -154,7 +154,7 @@ offset=0,rtt=0,samples=[],audioOn=false,loaded=null,tgt=0,drift=0,synced=true,la
 boost=1,uploadBusy=false,uploadStatus='',lastDur=0,errT=null,qmap={},yl=[],qv=null,lastReq=0,lastStatus='',preId=null,
 lastReady=0,ytLoading=false,ytProgress=0,ytSongId=null,spotifyLoading=false,roomConnectTimer=null;
 
-let seekLat=0.3,seekAt=0,ytLat=0.8,ytSeekAt=0,ytRate=1,syncAdj=0,lastRep=0,lastRate=0,ytRateUntil=0,ytCool=0;try{syncAdj=Number(localStorage.syncAdj)||0}catch{}
+let seekLat=0.3,seekAt=0,ytLat=0.8,ytSeekAt=0,ytRate=1,syncAdj=0,lastRep=0,lastRate=0,ytCoarse=false,ytRateUntil=0,ytCool=0;try{syncAdj=Number(localStorage.syncAdj)||0}catch{}
 let audioContext=null,gainNode=null;const qrCache={};let qrBusy=false;
 let analyser=null,fbins=null,lvl=0,eAvg=0,ambOn=false;
 function ambLoop(){
@@ -231,8 +231,9 @@ function fixAudio(p){
 }
 ['pointerdown','keydown','touchstart'].forEach(ev=>document.addEventListener(ev,()=>{if(ytPlayer)fixAudio(ytPlayer)},{passive:true}));
 let stats={visits:0,rooms:0,joins:0,live:0};
-(function(){const first=!sessionStorage.getItem('v');try{sessionStorage.setItem('v','1')}catch{}
-fetch('/api/stats'+(first?'?visit=1':'')).then(r=>r.json()).then(s=>{stats=s;const l=document.getElementById('liveN');if(l)l.textContent=s.live;const e=document.getElementById('bigN');if(e){const t0=performance.now(),to=s.visits;(function f(t){const k=Math.min(1,(t-t0)/1200);e.textContent=Math.round(to*(1-Math.pow(1-k,3))).toLocaleString();if(k<1)requestAnimationFrame(f)})(t0)}}).catch(()=>{})})();
+let shownV=0;
+function loadStats(visit){fetch('/api/stats'+(visit?'?visit=1':''),{cache:'no-store'}).then(r=>r.json()).then(s=>{stats=s;const l=document.getElementById('liveN');if(l)l.textContent=s.live;const e=document.getElementById('bigN');if(!e)return;const from=shownV,to=s.visits,t0=performance.now();shownV=to;(function f(t){const k=Math.min(1,(t-t0)/1000);e.textContent=Math.round(from+(to-from)*(1-Math.pow(1-k,3))).toLocaleString();if(k<1)requestAnimationFrame(f)})(t0)}).catch(()=>{})}
+(function(){let first=true;try{first=!sessionStorage.getItem('v');sessionStorage.setItem('v','1')}catch{}loadStats(first);setInterval(()=>loadStats(false),8000)})();
 const dbgLog=[];function dbg(m){dbgLog.push(new Date().toLocaleTimeString()+'  '+m);if(dbgLog.length>40)dbgLog.shift()}
 window.addEventListener('error',e=>dbg('JS ERROR: '+e.message));window.addEventListener('unhandledrejection',e=>dbg('PROMISE: '+(e.reason&&e.reason.message||e.reason)));
 let ytGate=0,ytStartAt=0,ytPlayedOnce=false;const ytFB=new Set(),spEmbed=new Set(),useYT=s=>!!(s&&s.videoId&&!ytFB.has(s.videoId));
@@ -278,9 +279,13 @@ function syncYouTube(song,target,playing,hold){
       if(playing||hold){
         if(audioOn&&(ps===-1||ps===P.PAUSED||ps===P.CUED)){try{if(ytPlayer.isMuted())ytPlayer.unMute()}catch{}ytPlayer.playVideo()}
         else if(playing&&ps===P.PLAYING){
-          const dd=Number(ytPlayer.getCurrentTime()||0)-(target+outLat()),a=Math.abs(dd);if(window.__lsAt&&now()-window.__lsAt>1500){window.__lsAt=0;if(a<1)ytLat=Math.max(0.05,Math.min(2.5,ytLat-dd*0.7))}drift=dd;synced=a<0.3;
-          if(a>(role==='commander'?1.5:0.2)&&now()-lastSeek>4000){lastSeek=now();ytSeekAt=now();window.__lsAt=now();ytRate=1;try{ytPlayer.setPlaybackRate(1)}catch{}ytPlayer.seekTo(Math.max(0,target+outLat()+ytLat),true)}
-          else if(ytRate!==1){ytRate=1;try{ytPlayer.setPlaybackRate(1)}catch{}}
+          const dd=Number(ytPlayer.getCurrentTime()||0)-target,a=Math.abs(dd);if(window.__lsAt&&now()-window.__lsAt>1500){window.__lsAt=0;if(a<1)ytLat=Math.max(0.05,Math.min(2.5,ytLat-dd*0.7))}drift=dd;synced=a<0.04;
+          if(a>(role==='commander'?1.5:0.5)&&now()-lastSeek>3000){lastSeek=now();ytSeekAt=now();window.__lsAt=now();ytRate=1;try{ytPlayer.setPlaybackRate(1)}catch{}ytPlayer.seekTo(Math.max(0,target+ytLat),true)}
+          else if(role!=='commander'&&!ytCoarse){
+            if(ytRate!==1&&now()-lastRate>350){let g=ytRate;try{g=ytPlayer.getPlaybackRate()}catch{}if(Math.abs(g-ytRate)>0.01){ytCoarse=true;ytRate=g}}
+            if(!ytCoarse){let nr=ytRate;if(a>0.015)nr=1-Math.sign(dd)*Math.min(0.06,0.01+a*0.5);else if(a<0.006)nr=1;
+              if(Math.abs(nr-ytRate)>0.004&&now()-lastRate>300){lastRate=now();ytRate=nr;try{ytPlayer.setPlaybackRate(nr)}catch{}}}
+          }else if(role!=='commander'){if(ytRate!==1){if(now()>=ytRateUntil){ytRate=1;try{ytPlayer.setPlaybackRate(1)}catch{}}}else if(a>0.015&&now()>ytCool){ytRate=dd<0?1.25:0.75;const ms=Math.max(120,Math.min(2000,a/0.25*1000));ytRateUntil=now()+ms;ytCool=now()+ms+700;try{ytPlayer.setPlaybackRate(ytRate)}catch{}}}else if(ytRate!==1){ytRate=1;try{ytPlayer.setPlaybackRate(1)}catch{}}
         }
       }else if(ps===P.PLAYING||ps===P.BUFFERING)ytPlayer.pauseVideo();
     }catch(e){}
@@ -682,12 +687,12 @@ function tick(){
     if(s.state==='loading'&&role==='commander'&&loaded===song.id&&au.readyState>=3&&now()-lastReady>700){lastReady=now();cmd('AUDIO_READY',{id:song.id})}
     if(loaded!==song.id){auStart=now();au.pause();au.src=song.audio||(song.videoId?'/yt-audio/'+song.videoId:'');au.load();loaded=song.id;setBoost(boost)}
     if(audioOn&&au.readyState<3&&now()-auStart>9000&&(playing||s.state==='loading'))audioMsg='server audio is not loading';
-    if(playing){if(au.paused&&audioOn)au.play().catch(e=>{if(now()-(window.__pe||0)>3000){window.__pe=now();dbg('au.play() blocked: '+e.name+' '+e.message)}});const lat=outLat(),d=au.currentTime-(tgt+lat),a=Math.abs(d);drift=d;if(a>(role==='commander'?1.5:0.4)&&now()-lastSeek>1500&&!au.seeking){try{au.currentTime=tgt+lat+seekLat;seekAt=now()}catch{}lastSeek=now();au.playbackRate=1}else if(role!=='commander'){const cr=au.playbackRate;let nr=cr;if(a>0.06)nr=1-Math.sign(d)*Math.min(0.03,0.008+a*0.15);else if(a<0.02)nr=1;if(Math.abs(nr-cr)>0.004&&now()-lastRate>1000){lastRate=now();au.playbackRate=nr}}else au.playbackRate=1;synced=a<0.15}else{if(!au.paused)au.pause();au.playbackRate=1;if(Math.abs(au.currentTime-tgt)>0.05){try{au.currentTime=tgt}catch{}}synced=true}
+    if(playing){if(au.paused&&audioOn)au.play().catch(e=>{if(now()-(window.__pe||0)>3000){window.__pe=now();dbg('au.play() blocked: '+e.name+' '+e.message)}});const lat=outLat(),d=au.currentTime-(tgt+lat),a=Math.abs(d);drift=d;if(a>(role==='commander'?1.5:0.4)&&now()-lastSeek>1500&&!au.seeking){try{au.currentTime=tgt+lat+seekLat;seekAt=now()}catch{}lastSeek=now();au.playbackRate=1}else if(role!=='commander'){const cr=au.playbackRate;let nr=cr;if(a>0.015)nr=1-Math.sign(d)*Math.min(0.03,0.006+a*0.15);else if(a<0.006)nr=1;if(Math.abs(nr-cr)>0.004&&now()-lastRate>500){lastRate=now();au.playbackRate=nr}}else au.playbackRate=1;synced=a<0.04}else{if(!au.paused)au.pause();au.playbackRate=1;if(Math.abs(au.currentTime-tgt)>0.05){try{au.currentTime=tgt}catch{}}synced=true}
   }
   const cur=$('#cur');if(cur)cur.textContent=fmt(tgt);const bar=$('#bar');if(bar&&!dragging){if(song.duration>0)bar.max=song.duration;bar.value=tgt}const pb=$('#pb');if(pb&&song.duration>0)pb.style.width=(100*tgt/song.duration)+'%';const st=$('#st');if(st){const h=status();if(h!==lastStatus&&now()-lastSt>500){lastSt=now();lastStatus=h;st.innerHTML=h}}playOK=useYT(song)?!!(ytPlayer&&ytLoadedId===song.id&&typeof ytPlayer.getPlayerState==='function'&&ytPlayer.getPlayerState()===1):(!au.paused&&au.readyState>=3);if(playOK)audioMsg='';
   preload();
-  if(role==='commander'&&playing&&now()-lastRep>1000){let p=null;
-    if(useYT(song)){if(ytPlayer&&ytLoadedId===song.id&&now()>=ytGate&&typeof ytPlayer.getPlayerState==='function'&&ytPlayer.getPlayerState()===YT.PlayerState.PLAYING)p=Number(ytPlayer.getCurrentTime())-outLat()}
+  if(role==='commander'&&playing&&now()-lastRep>300){let p=null;
+    if(useYT(song)){if(ytPlayer&&ytLoadedId===song.id&&now()>=ytGate&&typeof ytPlayer.getPlayerState==='function'&&ytPlayer.getPlayerState()===YT.PlayerState.PLAYING)p=Number(ytPlayer.getCurrentTime())}
     else if(loaded===song.id&&!au.paused&&!au.seeking&&au.readyState>=3)p=au.currentTime-outLat();
     if(p!=null&&isFinite(p)&&Math.abs(p-tgt)<1.5){lastRep=now();tx({type:'POS',id:song.id,pos:p,t:serverNow()})}}
 }
@@ -701,7 +706,7 @@ function status(){
   if(snap.state==='loading')return '<span class="w">⏳ Loading song...</span>';
   if(snap.state!=='playing')return '<span class="g">✓ Audio ready · Paused</span>';
   if(!playOK)return '<span class="w">● Waiting for audio'+(audioMsg?' · '+esc(audioMsg):'...')+'</span>';
-  return synced?'<span class="g">● Synchronized'+(role==='commander'?' (master)':' ('+(drift>=0?'+':'−')+Math.round(Math.abs(drift)*1000)+' ms)')+'</span>':'<span class="w">● Synchronizing...</span>';
+  return synced?'<span class="g">● Synchronized'+(role==='commander'?' (master)':' ('+(drift>=0?'+':'−')+Math.round(Math.abs(drift)*1000)+' ms)')+'</span>':'<span class="w">● Adjusting ('+(drift>=0?'+':'−')+Math.round(Math.abs(drift)*1000)+' ms)...</span>';
 }
 
 const playCmd=id=>`playSong('${esc(id)}')`;
@@ -772,7 +777,7 @@ function queue(){
   </section>`;
 }
 
-const HEADER=r=>`<header><div style="text-align:left"><b onclick="logoTap()">SYNC<i>ROOM</i></b><div onclick="toggleDbg()" style="font-size:11px;opacity:.6;margin-top:3px;cursor:pointer;text-decoration:underline">build 10 · tap for debug</div></div>${r?`<span class="lbl">${r}</span>`:''}</header><div class="brand">XENBERG</div><div class="presents">Presents</div>`;
+const HEADER=r=>`<header><div style="text-align:left"><b onclick="logoTap()">SYNC<i>ROOM</i></b><div onclick="toggleDbg()" style="font-size:11px;opacity:.6;margin-top:3px;cursor:pointer;text-decoration:underline">build 14 · tap for debug</div></div>${r?`<span class="lbl">${r}</span>`:''}</header><div class="brand">XENBERG</div><div class="presents">Presents</div>`;
 
 function volumeCard(label){
   return `<section class="card">
@@ -985,13 +990,13 @@ function draw(){
 draw();
 
 
-// ---- Debug panel (tap "build 10" under Presents) ----
+// ---- Debug panel (tap "build 14" under Presents) ----
 let dbgOn=false,dbgEl=null,dbgT=null,taps=0,tapT=0;
 function logoTap(){const n=Date.now();taps=n-tapT<1200?taps+1:1;tapT=n;if(taps>=5){taps=0;toggleDbg()}}
 function dbgText(){
   const sg=snap&&(snap.snapSong||snap.song),L=[];
   const yt=sg?useYT(sg):false;let ps='-';try{if(ytPlayer&&ytPlayer.getPlayerState)ps=ytPlayer.getPlayerState()}catch{}
-  L.push('build 10  role='+role+'  conn='+conn+'  ws='+(ws?ws.readyState:'none'));
+  L.push('build 14  role='+role+'  conn='+conn+'  ws='+(ws?ws.readyState:'none'));
   L.push('room='+roomId+'  devices='+(snap?snap.devices:'-')+'  state='+(snap?snap.state:'-'));
   L.push('song='+(sg?sg.id+' ['+sg.source+']':'-'));
   L.push('engine='+(sg?(yt?'YouTube embed':'server audio'):'-')+'  playOK='+playOK+'  audioOn='+audioOn);
