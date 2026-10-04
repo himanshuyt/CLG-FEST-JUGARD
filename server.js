@@ -358,7 +358,7 @@ wss.on('connection',ws=>{
       const isCmd=!!(m.token&&tokEq(m.token,r.token));
       if(isCmd)r.cmd=ws;
       ws.role=isCmd?'commander':'participant';
-      ws.room=r;
+      ws.room=r;ws.jn=0;
       r.members.add(ws);
       send(ws,{type:'JOINED',roomId:r.id,role:ws.role});
       send(ws,{type:'SYNC_RESPONSE',state:snap(r,true)});
@@ -393,6 +393,15 @@ wss.on('connection',ws=>{
       return;
     }
 
+    if(m.type==='JOIN_HELLO'){
+      if(ws.jn||ws.role!=='participant')return;ws.jn=1;
+      const n=String(m.n||'').replace(/[<>\u0000-\u001f]/g,'').trim().slice(0,20);if(n)ws.nm=n;
+      const dev=String(m.dev||'Device').replace(/[<>\u0000-\u001f]/g,'').slice(0,24);
+      if(!ws.did)ws.did=r.dn=(r.dn||0)+1;
+      const d=JSON.stringify({type:'JOIN_NOTE',name:ws.nm||'',dev});
+      [r.cmd,...(r.admins||[])].forEach(w=>{if(w&&w!==ws&&w.readyState===1)w.send(d)});
+      return;
+    }
     if(m.type==='NAME'){ws.nm=String(m.n||'').replace(/[<>\u0000-\u001f]/g,'').trim().slice(0,20);return}
     // ---- admins + remove device ----
     if(m.type==='ADMIN_SET'){
