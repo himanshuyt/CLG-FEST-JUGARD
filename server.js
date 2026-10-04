@@ -59,7 +59,7 @@ app.use('/vendor',express.static(path.join(D,'node_modules/qrcode/build'),{maxAg
 app.use(express.static(path.join(D,'public'),{maxAge:0}));
 app.get('/join/:id',(_,res)=>res.sendFile(path.join(D,'public','index.html')));
 
-const VISIT_BASE=107; // vibe count starts from here; new unique visitors are added on top
+const VISIT_BASE=109; // vibe count starts from here; new unique visitors are added on top
 const STATS_F=path.join(__dirname,'stats.json');let ST={visits:0,rooms:0,joins:0,seen:[]};const SEEN=new Set();
 try{ST={...ST,...JSON.parse(fs.readFileSync(STATS_F,'utf8'))}}catch{}
 ST.seen=Array.isArray(ST.seen)?ST.seen:[];ST.seen.forEach(x=>SEEN.add(x));
@@ -242,6 +242,7 @@ function addSongsToRoom(r,tracks,play,quiet){for(const raw of tracks){const song
 async function ytRoom(r,url,play){r.pend++;try{const result=await resolveYouTube(url);if(rooms.has(r.id))addSongsToRoom(r,result.tracks,play)}catch(e){console.error('YOUTUBE RESOLVE ERROR:',e.message||e);if(rooms.has(r.id))notice(r,e.message||'Could not resolve this YouTube link.')}finally{r.pend--}}
 
 const isMgr=(ws,r)=>(ws.role==='commander'&&r.cmd===ws)||(ws.role==='admin'&&!!r.admins&&r.admins.has(ws));
+function promoteAdmin(r){let t=null;if(r.admins)r.admins.forEach(w=>{if(!t&&w.readyState===1&&r.members.has(w))t=w});if(!t)return false;r.token=crypto.randomBytes(24).toString('hex');r.admins.delete(t);t.role='commander';r.cmd=t;send(t,{type:'ROLE_CHANGE',role:'commander',token:r.token});return true}
 function leave(ws){
   const r=ws.room;
   ws.room=null;ws.role=null;
@@ -370,7 +371,7 @@ wss.on('connection',ws=>{
     if(!r)return err(ws,'You are not in a room.');
 
     if(m.type==='SYNC_REQUEST')return send(ws,{type:'SYNC_RESPONSE',state:snap(r,true)});
-    if(m.type==='ROOM_LEAVE')return leave(ws);
+    if(m.type==='ROOM_LEAVE'){if(r.cmd===ws&&ws.role==='commander')promoteAdmin(r);return leave(ws)}
 
     // ---- device list + manual sync (commander tools; separate from playback/sync) ----
     if(m.type==='DRIFT'){
@@ -568,7 +569,7 @@ wss.on('connection',ws=>{
   });
 
   ws.on('error',e=>console.error('WebSocket error:',e.message||e));
-  ws.on('close',()=>leave(ws));
+  ws.on('close',()=>{const r=ws.room,was=!!r&&r.cmd===ws;leave(ws);if(was)setTimeout(()=>{if(rooms.has(r.id)&&!r.cmd)promoteAdmin(r)},20000)});
 });
 
 setInterval(()=>{
