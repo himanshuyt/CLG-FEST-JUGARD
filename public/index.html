@@ -128,6 +128,9 @@ body.amb #amb{opacity:.6}
 .plb h2{margin:0 0 4px}.pll{margin:12px 0;max-height:240px;overflow-y:auto;display:grid;gap:8px}
 .pll button{text-align:left;width:100%}.plnew{display:flex;gap:8px}
 .plnew input{flex:1;min-width:0;min-height:38px;border-radius:10px;border:1px solid #ffffff2a;background:#0003;color:var(--fg);padding:0 10px;font:inherit}
+.qbox{max-height:300px;overflow-y:auto;overscroll-behavior:contain;margin-top:6px;padding:0 10px;border-radius:14px;background:#0000001f;border:1px solid #ffffff12}
+.qbox::-webkit-scrollbar{width:6px}.qbox::-webkit-scrollbar-thumb{background:#ffffff33;border-radius:9px}
+.qbox .q:last-child{border-bottom:0}
 </style>
 </head>
 <body>
@@ -560,7 +563,7 @@ function onMsg(m){
       roomConnectTimer=null;
       if(st.qs){qmap={};st.qs.forEach(s=>{qmap[s.id]=s});yl=st.yl||[];qv=st.qv}
       else if(st.qv!==qv&&now()-lastReq>1000){lastReq=now();tx({type:'SYNC_REQUEST'})}
-      const k=[snap.songId,snap.state,snap.repeat,role==='commander'?snap.devices:0,snap.commanderOnline,snap.song?.duration,snap.amb,qv].join('|');
+      const k=[snap.songId,snap.state,snap.repeat,(role==='commander'||window.ADM)?snap.devices:0,snap.commanderOnline,snap.song?.duration,snap.amb,qv].join('|');
       if(k!==key||oldSong!==snap.songId||oldState!==snap.state){key=k;draw()}
       tick();
       break;
@@ -743,7 +746,7 @@ function spotifyColumn(){return `<section class="source-card"><h3>🟢 Spotify</
 
 function queue(){
   if(!snap||!Array.isArray(snap.queue))return '';
-  const cmdr=role==='commander';
+  const cmdr=role==='commander'||!!window.ADM;
   const rows=snap.queue.map((id,i)=>{
     const song=getSong(id);
     if(!song)return '';
@@ -770,11 +773,11 @@ function queue(){
         <button class="small wide" onclick="cmd('QUEUE_CLEAR')">🗑 Clear</button>
       </div>`:''}
     </div>
-    ${rows||'<div class="lbl" style="padding:12px 0">Queue is empty.</div>'}
+    <div class="qbox">${rows||'<div class="lbl" style="padding:12px 0">Queue is empty.</div>'}</div>
   </section>`;
 }
 
-const HEADER=r=>`<header><div style="text-align:left"><b onclick="logoTap()">SYNC<i>ROOM</i></b><div onclick="toggleDbg()" style="font-size:11px;opacity:.6;margin-top:3px;cursor:pointer;text-decoration:underline">build 16 · tap for debug</div>${(role==='commander'&&view==='room')?'<div onclick="window.devOpen&&devOpen()" style="font-size:12px;margin-top:5px;cursor:pointer;color:#ffc94d;font-weight:700">👥 Devices &amp; sync</div>':''}<button id="wChip2" onclick="window.wOpen&&wOpen()" title="Why SyncRoom?">🎉</button></div>${r?`<span class="lbl">${r}</span>`:''}</header><div class="brand">XENBERG</div><div class="presents">Presents</div>`;
+const HEADER=r=>`<header><div style="text-align:left"><b onclick="logoTap()">SYNC<i>ROOM</i></b><div onclick="toggleDbg()" style="font-size:11px;opacity:.6;margin-top:3px;cursor:pointer;text-decoration:underline">build 17 · tap for debug</div>${((role==='commander'||window.ADM)&&view==='room')?'<div onclick="window.devOpen&&devOpen()" style="font-size:12px;margin-top:5px;cursor:pointer;color:#ffc94d;font-weight:700">👥 Devices &amp; sync</div>':''}<button id="wChip2" onclick="window.wOpen&&wOpen()" title="Why SyncRoom?">🎉</button></div>${r?`<div style="text-align:right"><span class="lbl">${r}</span>${(role==='commander'&&view==='room')?'<div onclick="window.trOpen&&trOpen()" style="font-size:12px;margin-top:6px;cursor:pointer;color:#ffc94d;font-weight:700">🔁 Transfer Commander</div>':''}</div>`:''}</header><div class="brand">XENBERG</div><div class="presents">Presents</div>`;
 
 function volumeCard(label){
   return `<section class="card">
@@ -788,7 +791,7 @@ function volumeCard(label){
     <input id="adjS" type="range" min="-2" max="2" step="0.01" value="${syncAdj}" oninput="setAdj(this.value)" style="margin-top:10px">
     <div class="adjl"><span class="l">− plays later</span><span class="e">+ plays earlier</span></div>
     <div class="lbl" style="margin-top:8px">Auto-sync with the Commander runs every second.</div>
-    ${role==='commander'?`<button style="margin-top:12px;width:100%" onclick="cmd('AMBIENT',{on:${!snap.amb}})">💡 Ambience light: ${snap.amb?'ON':'OFF'}</button>`:''}
+    ${(role==='commander'||window.ADM)?`<button style="margin-top:12px;width:100%" onclick="cmd('AMBIENT',{on:${!snap.amb}})">💡 Ambience light: ${snap.amb?'ON':'OFF'}</button>`:''}
   </section>`;
 }
 
@@ -803,8 +806,8 @@ function room(){
     </section>`;
   }
 
-  const song=snap.song,playing=snap.state==='playing'||snap.state==='loading',cmdr=role==='commander';
-  let h=HEADER(cmdr?'👑 Commander':'📱 Room '+esc(roomId));
+  const song=snap.song,playing=snap.state==='playing'||snap.state==='loading',cmdr=role==='commander'||!!window.ADM;
+  let h=HEADER(role==='commander'?'👑 Commander':window.ADM?'🛡 Admin':'📱 Room '+esc(roomId));
   if(err)h+=`<p class="w" style="text-align:center">${esc(err)}</p>`;
 
   if(cmdr){
@@ -852,7 +855,7 @@ function room(){
       ${volumeCard('Audio Boost (Speaker amplification)')}
       <div class="source-grid">${localColumn()}${ytColumn()}${spotifyColumn()}</div>${plCard()}
       ${queue()}
-      <button class="end" onclick="if(confirm('End the room for everyone?'))endRoom()">End Room</button>`;
+      ${role==='commander'?`<button class="end" onclick="if(confirm('End the room for everyone?'))endRoom()">End Room</button>`:''}`;
   }else{
     h+=`${volumeCard('Audio Boost')}${addCard()}${queue()}
       <p class="c" style="margin-top:20px"><button onclick="leaveRoom()">Leave Room</button></p>`;
@@ -995,12 +998,12 @@ try{(function(){
   const st=document.createElement('style');
   st.textContent=`#chatBox{position:fixed;left:14px;top:150px;width:240px;height:320px;min-width:170px;min-height:130px;max-width:min(520px,60vw);max-height:80vh;resize:both;overflow:hidden;display:flex;flex-direction:column;z-index:20;box-sizing:border-box;padding:10px;border-radius:20px;background:linear-gradient(160deg,#2a1450f2,#150a2ef2);border:1px solid #ff5fa244;box-shadow:0 10px 40px #000a}
 #cbH{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;font-size:14px}
-#cbM{width:28px;height:28px;min-width:0;min-height:0;padding:0;border-radius:50%;background:#ffffff1a;font-size:14px;line-height:1}
+#cbE,#cbM{width:28px;height:28px;min-width:0;min-height:0;padding:0;border-radius:50%;background:#ffffff1a;font-size:14px;line-height:1}
 #chatBox #chatList{align-content:start;grid-auto-rows:min-content;flex:1;max-height:none;min-height:0;margin-bottom:0;font-size:13px}
 #cbR{display:flex;gap:6px;margin-top:6px}
 #chatBox input#chatIn{min-height:38px;border-radius:12px;font-size:13px;padding:0 10px}
 #chatBox #cbR button{min-width:0;min-height:38px;padding:0 12px;border-radius:12px}
-#chatBox.min{height:auto!important;min-height:0;resize:none}
+#chatBox.min{height:auto!important;min-height:0;resize:none}#chatBox.min,#chatBox.min *{cursor:pointer}
 #chatBox.min #chatList,#chatBox.min #cbR{display:none}
 @media(min-width:1000px){body.chatOn #app{margin-left:max(calc((100vw - 900px)/2),calc(var(--cw,0px) + 28px));margin-right:auto}}
 @media(max-width:999px){#chatBox{left:8px;right:8px;top:auto;bottom:8px;width:auto!important;height:250px;max-width:none;resize:vertical}}
@@ -1019,8 +1022,8 @@ try{(function(){
 #pCard{max-width:380px;width:100%;padding:24px 20px;border-radius:24px;text-align:center;background:linear-gradient(160deg,#2a1450,#150a2e);border:1px solid #ff5fa255;box-shadow:0 0 50px #ff4d8d44;transform:scale(.9);transition:transform .3s}
 #pOv.on #pCard{transform:none}
 #pCard h3{margin:0 0 6px;font-size:20px}
-input#pubName,input#chatIn{flex:1;width:100%;min-width:0;min-height:48px;border-radius:14px;border:1px solid #ffffff2a;background:#0003;color:var(--fg);padding:0 12px;font:inherit}
-input#pubName::placeholder,input#chatIn::placeholder{color:#ffffff66}
+input#pubName,input#chatIn,input#nName{flex:1;width:100%;min-width:0;min-height:48px;border-radius:14px;border:1px solid #ffffff2a;background:#0003;color:var(--fg);padding:0 12px;font:inherit}
+input#pubName::placeholder,input#chatIn::placeholder,input#nName::placeholder{color:#ffffff66}
 button.sw{width:48px;height:27px;min-width:0;min-height:0;padding:0;border-radius:99px;background:#ffffff26;position:relative;flex:none}
 button.sw::after{content:'';position:absolute;top:3px;left:3px;width:21px;height:21px;border-radius:50%;background:#fff;transition:left .25s}
 button.sw.on{background:linear-gradient(90deg,#ff4d8d,#ffc94d)}button.sw.on::after{left:24px}
@@ -1061,9 +1064,9 @@ button.sw.on{background:linear-gradient(90deg,#ff4d8d,#ffc94d)}button.sw.on::aft
   // ===== public rooms + chat =====
   const PUB={on:false,name:'',msgs:[],ask:false,rooms:[],nick:'Guest'+(1000+Math.floor(Math.random()*9000))};
   const E=x=>esc(String(x));
-  const msgH=m=>`<div><b style="color:${m.cmd?'#ffc94d':'#ff8fb8'}">${m.cmd?'👑 ':''}${E(m.nick)}</b> ${E(m.text)}</div>`;
+  const msgH=m=>`<div><b style="color:${m.cmd||m.adm?'#ffc94d':'#ff8fb8'}">${m.cmd?'👑 ':m.adm?'🛡 ':''}${E(m.nick)}</b> ${E(m.text)}</div>`;
   window.pubCtlHTML=function(){
-    if(role!=='commander')return '';
+    if(role!=='commander'&&!window.ADM)return '';
     const sw=`<button class="sw ${PUB.on||PUB.pend?'on':''}" onclick="pubTog()" aria-label="Public room"></button>`;
     let x=`<div style="height:1px;background:#ffffff14;margin:12px 0"></div><div class="pubRow"><div style="flex:1"><b>🌐 Public room</b><div class="lbl" style="margin:2px 0 0">${PUB.on?'Listed on the home page: '+E(PUB.name):'Show this room on the home page'}</div></div>${sw}</div>`;
     return x;
@@ -1077,9 +1080,12 @@ button.sw.on{background:linear-gradient(90deg,#ff4d8d,#ffc94d)}button.sw.on::aft
     if(b)return;
     b=document.createElement('div');b.id='chatBox';if(PUB.min)b.classList.add('min');
     if(PUB.w&&innerWidth>=1000){b.style.width=PUB.w+'px';b.style.height=PUB.h+'px'}
-    b.innerHTML=`<div id="cbH"><b>💬 Room chat</b><button id="cbM" title="Minimize">${PUB.min?'▢':'—'}</button></div><div id="chatList"></div><div id="cbR"><input id="chatIn" maxlength="200" placeholder="Say something..." autocomplete="off" onkeydown="if(event.key==='Enter')chatSend()"><button class="pri" onclick="chatSend()">Send</button></div>`;
+    b.innerHTML=`<div id="cbH"><b>💬 Room chat</b><span style="display:flex;gap:6px"><button id="cbE" title="Change name">✎</button><button id="cbM" title="Minimize">${PUB.min?'▢':'—'}</button></span></div><div id="chatList"></div><div id="cbR"><input id="chatIn" maxlength="200" placeholder="Say something..." autocomplete="off" onkeydown="if(event.key==='Enter')chatSend()"><button class="pri" onclick="chatSend()">Send</button></div>`;
     document.body.appendChild(b);document.body.classList.add('chatOn');
-    b.querySelector('#cbM').onclick=()=>{PUB.min=!PUB.min;b.classList.toggle('min',PUB.min);b.querySelector('#cbM').textContent=PUB.min?'▢':'—'};
+    b.querySelector('#cbE').onclick=e=>{e.stopPropagation();if(window.askName)askName(true)};
+    b.querySelector('#cbM').onclick=()=>{PUB.min=!PUB.min;b.classList.toggle('min',PUB.min);b.querySelector('#cbM').textContent=PUB.min?'▢':'—';if(!PUB.min&&window.askName)askName()};
+    b.addEventListener('click',e=>{if(PUB.min||b.classList.contains('min')){e.stopPropagation();e.preventDefault();PUB.min=false;b.classList.remove('min');b.querySelector('#cbM').textContent='—';if(window.askName)askName()}},true);
+    if(!PUB.min)setTimeout(()=>{if(window.askName)askName()},80);
     if(window.ResizeObserver)new ResizeObserver(()=>{if(!b.isConnected)return;document.documentElement.style.setProperty('--cw',b.offsetWidth+'px');if(!b.classList.contains('min')&&innerWidth>=1000){PUB.w=b.offsetWidth;PUB.h=b.offsetHeight}}).observe(b);
     renderMsgs();
   }
@@ -1103,10 +1109,10 @@ button.sw.on{background:linear-gradient(90deg,#ff4d8d,#ffc94d)}button.sw.on::aft
     i.onkeydown=e=>{if(e.key==='Enter')yes();if(e.key==='Escape')no()};
     o.addEventListener('click',e=>{if(e.target===o)no()});
   }
-  window.chatSend=function(){const i=document.getElementById('chatIn');if(!i)return;const t=i.value.trim();if(!t)return;tx({type:'CHAT',text:t,nick:role==='commander'?'Commander':PUB.nick});i.value=''};
+  window.chatSend=function(){const i=document.getElementById('chatIn');if(!i)return;const t=i.value.trim();if(!t)return;if(window.myName&&!myName()){window.askName&&askName();return}tx({type:'CHAT',text:t,nick:(window.myName&&myName())||PUB.nick});i.value=''};
   window.PUBmsg=function(raw){
     const m=JSON.parse(raw);
-    if(m.type==='JOINED'||m.type==='ROOM_ENDED'){PUB.on=false;PUB.name='';PUB.msgs=[];PUB.ask=false;refresh()}
+    if(m.type==='JOINED'||m.type==='ROOM_ENDED'){window.ADM=false;PUB.on=false;PUB.name='';PUB.msgs=[];PUB.ask=false;refresh()}
     else if(m.type==='PUBLIC_INFO'){PUB.on=!!m.on;PUB.name=m.name||'';PUB.msgs=Array.isArray(m.chat)?m.chat:[];PUB.ask=false;PUB.pend=false;refresh()}
     else if(m.type==='CHAT_MSG'&&PUB.on){PUB.msgs.push(m.msg);if(PUB.msgs.length>50)PUB.msgs.shift();
       const l=document.getElementById('chatList');
@@ -1153,14 +1159,14 @@ try{(function(){
   let ov=null,timer=null,rows=new Map();
   const status=d=>d===null?['na','Waiting']:Math.abs(d)<40?['ok','In sync']:d>0?['fw','Forward +'+d+' ms']:['bw','Backward −'+Math.abs(d)+' ms'];
   window.devOpen=function(){
-    if(ov||role!=='commander')return;
+    if(ov||(role!=='commander'&&!window.ADM))return;
     ov=document.createElement('div');ov.id='dOv';rows=new Map();
     ov.innerHTML=`<div id="dCard"><button id="dX" aria-label="Close">✕</button><h3 style="margin:0 0 4px;font-size:19px">👥 Devices &amp; sync</h3><div class="lbl" id="dSum" style="margin:0">Loading...</div><button class="pri" id="dAll" style="margin-top:10px;width:100%">⚡ Sync all out-of-sync devices</button><div id="dList"></div><p class="note" style="margin:10px 0 0">Forward = plays ahead of you · Backward = plays behind you. Sync jumps that device to your position right now.</p></div>`;
     document.body.appendChild(ov);requestAnimationFrame(()=>ov.classList.add('on'));
     const close=()=>{clearInterval(timer);const o=ov;ov=null;o.style.opacity='0';setTimeout(()=>o.remove(),250)};
     ov.querySelector('#dX').onclick=close;ov.addEventListener('click',e=>{if(e.target===ov)close()});
     ov.querySelector('#dAll').onclick=()=>{tx({type:'FORCE_SYNC',id:'all'});flash('Sync sent to all devices')};
-    const ask=()=>tx({type:'DEV_REQ'});ask();timer=setInterval(()=>{if(!ov||role!=='commander'||view!=='room'){clearInterval(timer);if(ov){ov.remove();ov=null}return}ask()},1500);
+    const ask=()=>tx({type:'DEV_REQ'});ask();timer=setInterval(()=>{if(!ov||(role!=='commander'&&!window.ADM)||view!=='room'){clearInterval(timer);if(ov){ov.remove();ov=null}return}ask()},1500);
   };
   window.DEVhandle=function(m){
     if(m.type==='FORCE_SYNC')return forceSyncNow();
@@ -1168,11 +1174,18 @@ try{(function(){
     const list=document.getElementById('dList');if(!list)return;
     let ok=0,fw=0,bw=0;const seen=new Set();
     m.list.forEach(x=>{
-      const [c,t]=status(x.d);if(c==='ok')ok++;else if(c==='fw')fw++;else if(c==='bw')bw++;
+      const [c,t]=status(x.d);if(!x.c){if(c==='ok')ok++;else if(c==='fw')fw++;else if(c==='bw')bw++}
       seen.add(x.id);let r=rows.get(x.id);
-      if(!r){const el=document.createElement('div');el.className='dRow';el.innerHTML='<span class="nm"></span><span class="ch"></span><button>Sync</button>';el.querySelector('button').onclick=()=>{tx({type:'FORCE_SYNC',id:x.id});flash('Sync sent')};list.appendChild(el);r={el,nm:el.querySelector('.nm'),ch:el.querySelector('.ch')};rows.set(x.id,r)}
-      const nm=(x.n||'Device')+' #'+x.id;if(r.nm.textContent!==nm)r.nm.textContent=nm;
-      r.ch.className='ch '+c;if(r.ch.textContent!==t)r.ch.textContent=t;
+      if(!r){const el=document.createElement('div');el.className='dRow';el.innerHTML='<span class="nm"></span><span class="ch"></span><span class="ac"><button class="bS">Sync</button><button class="bA"></button><button class="bR">Remove</button></span>';
+        const id=x.id;r={el,nm:el.querySelector('.nm'),ch:el.querySelector('.ch'),bS:el.querySelector('.bS'),bA:el.querySelector('.bA'),bR:el.querySelector('.bR'),a:0};
+        r.bS.onclick=()=>{tx({type:'FORCE_SYNC',id});flash('Sync sent')};
+        r.bA.onclick=()=>{const on=!r.a;tx({type:'ADMIN_SET',id,on});flash(on?'Admin added':'Admin removed')};
+        r.bR.onclick=()=>{if(confirm('Remove '+r.nm.textContent+' from the room?')){tx({type:'KICK',id});flash('Device removed')}};
+        list.appendChild(el);rows.set(x.id,r)}
+      r.a=x.a?1:0;const mine=role==='commander';
+      r.bS.style.display=x.c?'none':'';r.bA.style.display=(x.c||!mine)?'none':'';r.bA.textContent=x.a?'Remove admin':'Make admin';r.bR.style.display=(x.c||(!mine&&x.a))?'none':'';
+      const nm=(x.c?'👑 ':x.a?'🛡 ':'')+(x.n||'Device')+(x.c||x.u?'':' #'+x.id);if(r.nm.textContent!==nm)r.nm.textContent=nm;
+      r.ch.className='ch '+c;const tt=x.c?'Commander':t;if(r.ch.textContent!==tt)r.ch.textContent=tt;
     });
     rows.forEach((r,id)=>{if(!seen.has(id)){r.el.remove();rows.delete(id)}});
     const s=document.getElementById('dSum');
@@ -1182,16 +1195,86 @@ try{(function(){
 })()}catch(e){console.warn('dev module',e)}
 
 
+// ---- Transfer Commander (additive) ----
+try{(function(){
+  const st=document.createElement('style');st.textContent=`#tOv{position:fixed;inset:0;z-index:10004;display:flex;align-items:center;justify-content:center;padding:14px;background:#000a;opacity:0;transition:opacity .25s}
+#tOv.on{opacity:1}
+#tCard{position:relative;max-width:400px;width:100%;max-height:80vh;display:flex;flex-direction:column;padding:22px 16px 16px;border-radius:24px;text-align:center;background:linear-gradient(160deg,#2a1450,#150a2e);border:1px solid #ff5fa255;box-shadow:0 0 50px #ff4d8d44;transform:scale(.9);transition:transform .3s;box-sizing:border-box}
+#tOv.on #tCard{transform:none}
+#tCard h3{margin:0 0 4px;font-size:20px}
+#tList{display:grid;gap:8px;margin-top:12px;overflow-y:auto;min-height:0}
+#tX{position:absolute;top:10px;right:12px;min-width:0;min-height:0;width:30px;height:30px;padding:0;border-radius:50%;font-size:14px}`;document.head.appendChild(st);
+  st.textContent+=`.dRow{flex-wrap:wrap}.dRow .nm{flex:1 1 110px}.dRow .ac{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.dRow .bR{background:#ff4d6d33;border-color:#ff4d6d66}`;
+  const orr=window.reset;window.reset=function(){window.ADM=false;return orr.apply(this,arguments)};
+  let ov=null;
+  const close=()=>{if(!ov)return;const o=ov;ov=null;o.style.opacity='0';setTimeout(()=>o.remove(),250)};
+  window.trOpen=function(){
+    if(ov||role!=='commander')return;
+    ov=document.createElement('div');ov.id='tOv';
+    ov.innerHTML='<div id="tCard"><button id="tX" aria-label="Close">✕</button><h3>🔁 Transfer Commander</h3><div class="lbl" style="margin:0">Pick a device. It becomes the Commander and you become a listener.</div><div id="tList"><div class="lbl">Loading devices...</div></div></div>';
+    document.body.appendChild(ov);requestAnimationFrame(()=>ov.classList.add('on'));
+    ov.querySelector('#tX').onclick=close;ov.addEventListener('click',e=>{if(e.target===ov)close()});
+    tx({type:'DEV_REQ'});
+  };
+  // ---- your name (asked when you open the chat; shown in chat + device list) ----
+  st.textContent+=`#nOv{position:fixed;inset:0;z-index:10005;display:flex;align-items:center;justify-content:center;padding:18px;background:#000a;opacity:0;transition:opacity .25s}#nOv.on{opacity:1}#nCard{max-width:380px;width:100%;padding:24px 20px;border-radius:24px;text-align:center;background:linear-gradient(160deg,#2a1450,#150a2e);border:1px solid #ff5fa255;box-shadow:0 0 50px #ff4d8d44;transform:scale(.9);transition:transform .3s;box-sizing:border-box}#nOv.on #nCard{transform:none}#nCard h3{margin:0 0 6px;font-size:20px}`;
+  const gs=k=>{try{return sessionStorage.getItem(k)||''}catch{return ''}},ss=(k,v)=>{try{sessionStorage.setItem(k,v)}catch{}};
+  window.myName=()=>gs('sr_name');
+  const sendName=()=>{const n=myName();if(n)tx({type:'NAME',n})};
+  window.askName=function(force){
+    if(document.getElementById('nOv')||(!force&&myName()))return;
+    let last='';try{last=localStorage.getItem('sr_name_last')||''}catch{}
+    const o=document.createElement('div');o.id='nOv';
+    o.innerHTML='<div id="nCard"><h3>👋 What\'s your name?</h3><div class="lbl" style="margin-bottom:12px">Everyone in the room sees it in chat and in the device list</div><input id="nName" maxlength="20" placeholder="Your name" autocomplete="off"><div class="row" style="margin-top:12px"><button id="nNo" style="flex:1">Later</button><button class="pri" id="nYes" style="flex:1">Save ✓</button></div></div>';
+    document.body.appendChild(o);requestAnimationFrame(()=>o.classList.add('on'));
+    const i=o.querySelector('#nName');i.value=myName()||last;setTimeout(()=>{i.focus();i.select()},60);
+    const no=()=>o.remove();
+    const yes=()=>{const v=i.value.replace(/[<>]/g,'').trim().slice(0,20);if(!v){flash('Type a name first');return}
+      ss('sr_name',v);try{localStorage.setItem('sr_name_last',v)}catch{}sendName();o.remove();flash('Hi '+v+' 👋')};
+    o.querySelector('#nNo').onclick=no;o.querySelector('#nYes').onclick=yes;
+    i.onkeydown=e=>{if(e.key==='Enter')yes();if(e.key==='Escape')no()};
+    o.addEventListener('click',e=>{if(e.target===o)no()});
+  };
+  const op=window.PUBmsg;
+  window.PUBmsg=function(raw){
+    op&&op(raw);
+    try{
+      const m=JSON.parse(raw);
+      if(m.type==='JOINED'||m.type==='ROOM_CREATED')sendName();
+      if(m.type==='DEVICES'&&ov){
+        const l=ov.querySelector('#tList');if(!l)return;l.innerHTML='';
+        if(!m.list.length){l.innerHTML='<div class="lbl">No other devices in the room yet.</div>';return}
+        m.list.forEach(x=>{const el=document.createElement('div');el.className='dRow';
+          el.innerHTML='<span class="nm"></span><button class="pri">Transfer</button>';
+          el.querySelector('.nm').textContent=(x.n||'Device')+(x.u?'':' #'+x.id);
+          el.querySelector('button').onclick=()=>{tx({type:'TRANSFER',id:x.id});close();flash('Transferring...')};
+          l.appendChild(el)});
+      }else if(m.type==='ROLE_CHANGE'){
+        close();
+        if(m.role==='admin'){window.ADM=true;role='participant'}
+        else if(m.role==='commander'){window.ADM=false;role='commander';if(m.token){token=m.token;try{saveRoomHistory(roomId,m.token)}catch{}}}
+        else{window.ADM=false;role='participant';token='';try{saveRoomHistory(roomId,'')}catch{}}
+        key='';draw();
+        flash(m.role==='commander'?'👑 You are now the Commander':m.role==='admin'?'🛡 You are now an Admin':'You are now a listener');
+      }else if(m.type==='KICKED'){
+        close();window.ADM=false;try{localStorage.removeItem('sr')}catch{}reset('You were removed from the room.');draw();
+      }
+    }catch(x){}
+  };
+})()}catch(e){console.warn('transfer module',e)}
+
+
+
 draw();
 
 
-// ---- Debug panel (tap "build 16" under Presents) ----
+// ---- Debug panel (tap "build 17" under Presents) ----
 let dbgOn=false,dbgEl=null,dbgT=null,taps=0,tapT=0;
 function logoTap(){const n=Date.now();taps=n-tapT<1200?taps+1:1;tapT=n;if(taps>=5){taps=0;toggleDbg()}}
 function dbgText(){
   const sg=snap&&(snap.snapSong||snap.song),L=[];
   const yt=sg?useYT(sg):false;let ps='-';try{if(ytPlayer&&ytPlayer.getPlayerState)ps=ytPlayer.getPlayerState()}catch{}
-  L.push('build 16  role='+role+'  conn='+conn+'  ws='+(ws?ws.readyState:'none'));
+  L.push('build 17  role='+role+'  conn='+conn+'  ws='+(ws?ws.readyState:'none'));
   L.push('room='+roomId+'  devices='+(snap?snap.devices:'-')+'  state='+(snap?snap.state:'-'));
   L.push('song='+(sg?sg.id+' ['+sg.source+']':'-'));
   L.push('engine='+(sg?(yt?'YouTube embed':'server audio'):'-')+'  playOK='+playOK+'  audioOn='+audioOn);

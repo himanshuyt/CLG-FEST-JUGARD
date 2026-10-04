@@ -59,7 +59,7 @@ app.use('/vendor',express.static(path.join(D,'node_modules/qrcode/build'),{maxAg
 app.use(express.static(path.join(D,'public'),{maxAge:0}));
 app.get('/join/:id',(_,res)=>res.sendFile(path.join(D,'public','index.html')));
 
-const VISIT_BASE=65; // vibe count starts from here; new unique visitors are added on top
+const VISIT_BASE=88; // vibe count starts from here; new unique visitors are added on top
 const STATS_F=path.join(__dirname,'stats.json');let ST={visits:0,rooms:0,joins:0,seen:[]};const SEEN=new Set();
 try{ST={...ST,...JSON.parse(fs.readFileSync(STATS_F,'utf8'))}}catch{}
 ST.seen=Array.isArray(ST.seen)?ST.seen:[];ST.seen.forEach(x=>SEEN.add(x));
@@ -241,12 +241,14 @@ function addQ(r,id){if(r.queue.includes(id))return true;if(r.queue.length>=MAX_Q
 function addSongsToRoom(r,tracks,play,quiet){for(const raw of tracks){const song={...raw,type:'youtube',source:raw.source==='spotify'?'spotify':'youtube',audio:null};catalog.set(song.id,song);r.yt.set(song.id,song);addQ(r,song.id)}if(play&&tracks[0])setSong(r,tracks[0].id,true);else if(!r.s.songId&&tracks[0])setSong(r,tracks[0].id,false);r.qv++;if(quiet&&!play)soon(r);else bcast(r);if(!quiet)notice(r,play?`Starting ${tracks.length>1?'playlist':'playback'}...`:`Added ${tracks.length} track${tracks.length===1?'':'s'} to queue.`)}
 async function ytRoom(r,url,play){r.pend++;try{const result=await resolveYouTube(url);if(rooms.has(r.id))addSongsToRoom(r,result.tracks,play)}catch(e){console.error('YOUTUBE RESOLVE ERROR:',e.message||e);if(rooms.has(r.id))notice(r,e.message||'Could not resolve this YouTube link.')}finally{r.pend--}}
 
+const isMgr=(ws,r)=>(ws.role==='commander'&&r.cmd===ws)||(ws.role==='admin'&&!!r.admins&&r.admins.has(ws));
 function leave(ws){
   const r=ws.room;
   ws.room=null;ws.role=null;
   if(!r)return;
   r.members.delete(ws);
   if(r.cmd===ws)r.cmd=null;
+  if(r.admins)r.admins.delete(ws);
   if(rooms.has(r.id))soon(r);
 }
 
@@ -378,22 +380,53 @@ wss.on('connection',ws=>{
       return;
     }
     if(m.type==='DEV_REQ'){
-      if(ws.role!=='commander'||r.cmd!==ws)return err(ws,'Only the Commander can see devices.');
+      if(!isMgr(ws,r))return err(ws,'Only the Commander or an Admin can see devices.');
       const now=Date.now(),a=[];
-      r.members.forEach(w=>{if(w===ws)return;if(!w.did)w.did=r.dn=(r.dn||0)+1;const x=w.dr;a.push({id:w.did,n:x?x.n:'Device',d:x?x.d:null,s:x?x.s:0,age:x?now-x.t:null})});
-      a.sort((p,q)=>(q.d===null?1e9:Math.abs(q.d))-(p.d===null?1e9:Math.abs(p.d)));
+      r.members.forEach(w=>{if(w===ws)return;if(!w.did)w.did=r.dn=(r.dn||0)+1;const x=w.dr,c=r.cmd===w;a.push({id:w.did,n:w.nm||(c?'Commander':(x?x.n:'Device')),u:w.nm?1:0,d:c?0:(x?x.d:null),s:x?x.s:0,c:c?1:0,a:(r.admins&&r.admins.has(w))?1:0,age:x?now-x.t:null})});
+      a.sort((p,q)=>(q.c-p.c)||((q.d===null?1e9:Math.abs(q.d))-(p.d===null?1e9:Math.abs(p.d))));
       return send(ws,{type:'DEVICES',total:r.members.size-1,list:a.slice(0,200)});
     }
     if(m.type==='FORCE_SYNC'){
-      if(ws.role!=='commander'||r.cmd!==ws)return err(ws,'Only the Commander can sync devices.');
+      if(!isMgr(ws,r))return err(ws,'Only the Commander or an Admin can sync devices.');
       const all=m.id==='all',id=Number(m.id);
       r.members.forEach(w=>{if(w!==ws&&(all||w.did===id))send(w,{type:'FORCE_SYNC'})});
       return;
     }
 
+    if(m.type==='NAME'){ws.nm=String(m.n||'').replace(/[<>\u0000-\u001f]/g,'').trim().slice(0,20);return}
+    // ---- admins + remove device ----
+    if(m.type==='ADMIN_SET'){
+      if(ws.role!=='commander'||r.cmd!==ws)return err(ws,'Only the Commander can manage admins.');
+      const id=Number(m.id);let t=null;r.members.forEach(w=>{if(w!==ws&&w.did===id&&w.readyState===1)t=w});
+      if(!t)return err(ws,'That device is no longer in the room.');
+      r.admins=r.admins||new Set();
+      if(m.on){t.role='admin';r.admins.add(t)}else{t.role='participant';r.admins.delete(t)}
+      return send(t,{type:'ROLE_CHANGE',role:m.on?'admin':'participant'});
+    }
+    if(m.type==='KICK'){
+      if(!isMgr(ws,r))return err(ws,'Only the Commander or an Admin can remove devices.');
+      const id=Number(m.id);let t=null;r.members.forEach(w=>{if(w!==ws&&w.did===id)t=w});
+      if(!t)return err(ws,'That device is no longer in the room.');
+      if(t===r.cmd)return err(ws,'The Commander cannot be removed.');
+      if(ws.role==='admin'&&t.role==='admin')return err(ws,'Only the Commander can remove an Admin.');
+      send(t,{type:'KICKED'});leave(t);return;
+    }
+    // ---- transfer Commander role to another device ----
+    if(m.type==='TRANSFER'){
+      if(ws.role!=='commander'||r.cmd!==ws)return err(ws,'Only the Commander can transfer.');
+      const id=Number(m.id);let t=null;
+      r.members.forEach(w=>{if(w!==ws&&w.did===id&&w.readyState===1)t=w});
+      if(!t)return err(ws,'That device is no longer in the room.');
+      r.token=crypto.randomBytes(24).toString('hex');
+      ws.role='participant';t.role='commander';r.cmd=t;if(r.admins)r.admins.delete(t);
+      send(t,{type:'ROLE_CHANGE',role:'commander',token:r.token});
+      send(ws,{type:'ROLE_CHANGE',role:'participant'});
+      return bcast(r);
+    }
+
     // ---- public room + chat (separate from playback/sync) ----
     if(m.type==='PUBLIC_SET'){
-      if(ws.role!=='commander'||r.cmd!==ws)return err(ws,'Only the Commander can change this.');
+      if(!isMgr(ws,r))return err(ws,'Only the Commander or an Admin can change this.');
       const on=!!m.on,name=String(m.name||'').replace(/[<>\u0000-\u001f]/g,'').trim().slice(0,30);
       if(on&&!name)return err(ws,'Give your room a name first.');
       r.pub=on?name:null;r.chat=[];
@@ -405,8 +438,8 @@ wss.on('connection',ws=>{
       if(!r.pub)return;
       const t=Date.now();if(t-(ws.lc||0)<400)return;ws.lc=t;
       const text=String(m.text||'').replace(/[\u0000-\u001f]/g,' ').trim().slice(0,200);if(!text)return;
-      const nick=String(m.nick||'Guest').replace(/[<>\u0000-\u001f]/g,'').trim().slice(0,16)||'Guest';
-      const msg={nick,cmd:r.cmd===ws,text,t};
+      const nick=ws.nm||String(m.nick||'Guest').replace(/[<>\u0000-\u001f]/g,'').trim().slice(0,16)||'Guest';
+      const msg={nick,cmd:r.cmd===ws,adm:ws.role==='admin',text,t};
       (r.chat=r.chat||[]).push(msg);if(r.chat.length>50)r.chat.shift();
       const d=JSON.stringify({type:'CHAT_MSG',msg});
       r.members.forEach(w=>{if(w.readyState===1)w.send(d)});
@@ -420,7 +453,7 @@ wss.on('connection',ws=>{
 
     // everyone may ADD songs to the queue; only the Commander may play
     if(m.type==='YOUTUBE_ADD'||m.type==='SPOTIFY_ADD'){
-      const u=String(m.url||'').trim().slice(0,300),pl=ws.role==='commander'&&r.cmd===ws&&m.play!==false;
+      const u=String(m.url||'').trim().slice(0,300),pl=isMgr(ws,r)&&m.play!==false;
       if(!u)return err(ws,m.type==='YOUTUBE_ADD'?'Paste a YouTube link.':'Paste a Spotify link.');
       if(r.pend>=4)return err(ws,'Busy importing. Try again in a moment.');
       if(m.type==='YOUTUBE_ADD'){ytRoom(r,u,pl);return}
@@ -429,7 +462,7 @@ wss.on('connection',ws=>{
         if(rooms.has(r.id))notice(r,`Spotify: added ${n} song${n===1?'':'s'} from "${res.playlistName}".`);
       }catch(e){if(rooms.has(r.id))notice(r,e.message||'Could not import Spotify link.')}finally{r.pend--}})();return;
     }
-    if(ws.role!=='commander'||r.cmd!==ws)return err(ws,'Only the Commander can control playback.');
+    if(!isMgr(ws,r))return err(ws,'Only the Commander or an Admin can control playback.');
 
     const s=r.s;
 
