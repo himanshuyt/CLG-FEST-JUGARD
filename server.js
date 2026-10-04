@@ -59,7 +59,7 @@ app.use('/vendor',express.static(path.join(D,'node_modules/qrcode/build'),{maxAg
 app.use(express.static(path.join(D,'public'),{maxAge:0}));
 app.get('/join/:id',(_,res)=>res.sendFile(path.join(D,'public','index.html')));
 
-const VISIT_BASE=26; // vibe count starts from here; new unique visitors are added on top
+const VISIT_BASE=65; // vibe count starts from here; new unique visitors are added on top
 const STATS_F=path.join(__dirname,'stats.json');let ST={visits:0,rooms:0,joins:0,seen:[]};const SEEN=new Set();
 try{ST={...ST,...JSON.parse(fs.readFileSync(STATS_F,'utf8'))}}catch{}
 ST.seen=Array.isArray(ST.seen)?ST.seen:[];ST.seen.forEach(x=>SEEN.add(x));
@@ -67,9 +67,11 @@ let stDirty=false;setInterval(()=>{if(stDirty){stDirty=false;fs.writeFile(STATS_
 const bump=k=>{ST[k]++;stDirty=true};
 app.get('/api/stats',(req,res)=>{
   const vid=String(req.query.vid||'').slice(0,64);
-  if(req.query.visit&&/^[a-f0-9]{8,64}$/i.test(vid)&&!SEEN.has(vid)){SEEN.add(vid);ST.seen.push(vid);if(ST.seen.length>100000)ST.seen.shift();bump('visits')}
+  let ms=0;
+  if(req.query.visit&&/^[a-f0-9]{8,64}$/i.test(vid)&&!SEEN.has(vid)){SEEN.add(vid);ST.seen.push(vid);if(ST.seen.length>100000)ST.seen.shift();bump('visits');const n=VISIT_BASE+ST.visits;if(n>=100&&n%50===0)ms=n}
   let live=0;rooms.forEach(r=>{if(r.s&&r.s.state==='playing')live+=r.members.size});
-  res.set('Cache-Control','no-store');res.json({visits:VISIT_BASE+ST.visits,rooms:ST.rooms,joins:ST.joins,live})});
+  res.set('Cache-Control','no-store');res.json({visits:VISIT_BASE+ST.visits,rooms:ST.rooms,joins:ST.joins,live,milestone:ms||undefined})});
+app.get('/api/public-rooms',(req,res)=>{const a=[];rooms.forEach(r=>{if(r.pub&&r.members.size)a.push({id:r.id,name:r.pub,n:r.members.size,playing:!!(r.s&&r.s.state==='playing')})});a.sort((x,y)=>y.n-x.n);res.set('Cache-Control','no-store');res.json(a.slice(0,50))});
 app.get('/api/songs',(req,res)=>{
   const uid=getUid(req);
   res.set('Cache-Control','no-store');
@@ -358,6 +360,7 @@ wss.on('connection',ws=>{
       r.members.add(ws);
       send(ws,{type:'JOINED',roomId:r.id,role:ws.role});
       send(ws,{type:'SYNC_RESPONSE',state:snap(r,true)});
+      if(r.pub)send(ws,{type:'PUBLIC_INFO',on:true,name:r.pub,chat:r.chat||[]});
       return isCmd?bcast(r):soon(r);
     }
 
@@ -366,6 +369,49 @@ wss.on('connection',ws=>{
 
     if(m.type==='SYNC_REQUEST')return send(ws,{type:'SYNC_RESPONSE',state:snap(r,true)});
     if(m.type==='ROOM_LEAVE')return leave(ws);
+
+    // ---- device list + manual sync (commander tools; separate from playback/sync) ----
+    if(m.type==='DRIFT'){
+      if(ws.role==='commander')return;
+      ws.dr={d:Math.max(-60000,Math.min(60000,Math.round(Number(m.d)||0))),s:m.s?1:0,n:String(m.n||'Device').replace(/[<>\u0000-\u001f]/g,'').slice(0,24),t:Date.now()};
+      if(!ws.did)ws.did=r.dn=(r.dn||0)+1;
+      return;
+    }
+    if(m.type==='DEV_REQ'){
+      if(ws.role!=='commander'||r.cmd!==ws)return err(ws,'Only the Commander can see devices.');
+      const now=Date.now(),a=[];
+      r.members.forEach(w=>{if(w===ws)return;if(!w.did)w.did=r.dn=(r.dn||0)+1;const x=w.dr;a.push({id:w.did,n:x?x.n:'Device',d:x?x.d:null,s:x?x.s:0,age:x?now-x.t:null})});
+      a.sort((p,q)=>(q.d===null?1e9:Math.abs(q.d))-(p.d===null?1e9:Math.abs(p.d)));
+      return send(ws,{type:'DEVICES',total:r.members.size-1,list:a.slice(0,200)});
+    }
+    if(m.type==='FORCE_SYNC'){
+      if(ws.role!=='commander'||r.cmd!==ws)return err(ws,'Only the Commander can sync devices.');
+      const all=m.id==='all',id=Number(m.id);
+      r.members.forEach(w=>{if(w!==ws&&(all||w.did===id))send(w,{type:'FORCE_SYNC'})});
+      return;
+    }
+
+    // ---- public room + chat (separate from playback/sync) ----
+    if(m.type==='PUBLIC_SET'){
+      if(ws.role!=='commander'||r.cmd!==ws)return err(ws,'Only the Commander can change this.');
+      const on=!!m.on,name=String(m.name||'').replace(/[<>\u0000-\u001f]/g,'').trim().slice(0,30);
+      if(on&&!name)return err(ws,'Give your room a name first.');
+      r.pub=on?name:null;r.chat=[];
+      const d=JSON.stringify({type:'PUBLIC_INFO',on,name:on?name:'',chat:[]});
+      r.members.forEach(w=>{if(w.readyState===1)w.send(d)});
+      return;
+    }
+    if(m.type==='CHAT'){
+      if(!r.pub)return;
+      const t=Date.now();if(t-(ws.lc||0)<400)return;ws.lc=t;
+      const text=String(m.text||'').replace(/[\u0000-\u001f]/g,' ').trim().slice(0,200);if(!text)return;
+      const nick=String(m.nick||'Guest').replace(/[<>\u0000-\u001f]/g,'').trim().slice(0,16)||'Guest';
+      const msg={nick,cmd:r.cmd===ws,text,t};
+      (r.chat=r.chat||[]).push(msg);if(r.chat.length>50)r.chat.shift();
+      const d=JSON.stringify({type:'CHAT_MSG',msg});
+      r.members.forEach(w=>{if(w.readyState===1)w.send(d)});
+      return;
+    }
 
     if(m.type==='ROOM_END'){
       if(ws.role!=='commander'||r.cmd!==ws)return err(ws,'Only the Commander can end the room.');

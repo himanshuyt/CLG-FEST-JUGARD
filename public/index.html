@@ -232,7 +232,7 @@ function fixAudio(p){
 ['pointerdown','keydown','touchstart'].forEach(ev=>document.addEventListener(ev,()=>{if(ytPlayer)fixAudio(ytPlayer)},{passive:true}));
 let stats={visits:0,rooms:0,joins:0,live:0};
 let shownV=0;
-function loadStats(visit){fetch('/api/stats'+(visit?'?visit=1&vid='+encodeURIComponent(uid):''),{cache:'no-store'}).then(r=>r.json()).then(s=>{stats=s;const l=document.getElementById('liveN');if(l)l.textContent=s.live;const e=document.getElementById('bigN');if(!e)return;const from=shownV,to=s.visits,t0=performance.now();shownV=to;(function f(t){const k=Math.min(1,(t-t0)/1000);e.textContent=Math.round(from+(to-from)*(1-Math.pow(1-k,3))).toLocaleString()+'+';if(k<1)requestAnimationFrame(f)})(t0)}).catch(()=>{})}
+function loadStats(visit){fetch('/api/stats'+(visit?'?visit=1&vid='+encodeURIComponent(uid):''),{cache:'no-store'}).then(r=>r.json()).then(s=>{stats=s;if(s.milestone)try{window.msPop&&msPop(s.milestone)}catch(x){}const l=document.getElementById('liveN');if(l)l.textContent=s.live;const e=document.getElementById('bigN');if(!e)return;const from=shownV,to=s.visits,t0=performance.now();shownV=to;(function f(t){const k=Math.min(1,(t-t0)/1000);e.textContent=Math.round(from+(to-from)*(1-Math.pow(1-k,3))).toLocaleString()+'+';if(k<1)requestAnimationFrame(f)})(t0)}).catch(()=>{})}
 (function(){loadStats(true);setInterval(()=>loadStats(false),8000)})();
 const dbgLog=[];function dbg(m){dbgLog.push(new Date().toLocaleTimeString()+'  '+m);if(dbgLog.length>40)dbgLog.shift()}
 window.addEventListener('error',e=>dbg('JS ERROR: '+e.message));window.addEventListener('unhandledrejection',e=>dbg('PROMISE: '+(e.reason&&e.reason.message||e.reason)));
@@ -503,7 +503,7 @@ function connect(){
 
     draw();
   };
-  ws.onmessage=e=>{try{onMsg(JSON.parse(e.data))}catch(x){console.warn('onMsg error:',x)}};
+  ws.onmessage=e=>{try{onMsg(JSON.parse(e.data))}catch(x){console.warn('onMsg error:',x)}try{window.PUBmsg&&PUBmsg(e.data)}catch(x){}};
   ws.onerror=e=>{console.warn('SYNCROOM WebSocket error:',e);conn='reconnecting';draw()};
   ws.onclose=()=>{
     ws=null;
@@ -774,7 +774,7 @@ function queue(){
   </section>`;
 }
 
-const HEADER=r=>`<header><div style="text-align:left"><b onclick="logoTap()">SYNC<i>ROOM</i></b><div onclick="toggleDbg()" style="font-size:11px;opacity:.6;margin-top:3px;cursor:pointer;text-decoration:underline">build 15 · tap for debug</div></div>${r?`<span class="lbl">${r}</span>`:''}</header><div class="brand">XENBERG</div><div class="presents">Presents</div>`;
+const HEADER=r=>`<header><div style="text-align:left"><b onclick="logoTap()">SYNC<i>ROOM</i></b><div onclick="toggleDbg()" style="font-size:11px;opacity:.6;margin-top:3px;cursor:pointer;text-decoration:underline">build 16 · tap for debug</div>${(role==='commander'&&view==='room')?'<div onclick="window.devOpen&&devOpen()" style="font-size:12px;margin-top:5px;cursor:pointer;color:#ffc94d;font-weight:700">👥 Devices &amp; sync</div>':''}<button id="wChip2" onclick="window.wOpen&&wOpen()" title="Why SyncRoom?">🎉</button></div>${r?`<span class="lbl">${r}</span>`:''}</header><div class="brand">XENBERG</div><div class="presents">Presents</div>`;
 
 function volumeCard(label){
   return `<section class="card">
@@ -813,12 +813,14 @@ function room(){
       <div class="qr-box"><img id="qr" alt="Scan to join"></div>
       <div class="room-code-display">${esc(roomId)}</div>
       <p class="lbl">${snap.devices} device${snap.devices===1?'':'s'} connected</p>
+      <div id="pubCtl">${window.pubCtlHTML?pubCtlHTML():''}</div>
     </section>`;
   }
 
   if(!audioOn){
     h+=`<section class="card"><button class="pri" style="width:100%;font-size:16px" onclick="unlock()">🔊 Enable synchronized audio</button></section>`;
   }
+  h+=window.pubChatHTML?'<div id="chatWrap">'+pubChatHTML()+'</div>':'';
 
   if(song){
     h+=`${song.videoId&&song.source!=='spotify'?`<div class="yt-note">▶ YouTube streams directly — no server download.</div>`:''}
@@ -897,6 +899,7 @@ function draw(){
       <p class="note">Different devices and networks add a small delay, usually a few milliseconds. Devices re-sync with the Commander every second. If one still sounds off, open <b>Sync fine-tune</b> in the room and nudge it with + / −.</p>
     </section>
 
+    ${window.pubHome?pubHome():''}
     ${
       history.length
       ? `
@@ -984,16 +987,209 @@ function draw(){
   }
 }
 
+
+// ---- Public rooms + chat + milestone (additive; does not touch playback/sync) ----
+try{(function(){
+  const st=document.createElement('style');
+  st.textContent=`#chatBox{position:fixed;left:14px;top:150px;width:240px;height:320px;min-width:170px;min-height:130px;max-width:min(520px,60vw);max-height:80vh;resize:both;overflow:hidden;display:flex;flex-direction:column;z-index:20;box-sizing:border-box;padding:10px;border-radius:20px;background:linear-gradient(160deg,#2a1450f2,#150a2ef2);border:1px solid #ff5fa244;box-shadow:0 10px 40px #000a}
+#cbH{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;font-size:14px}
+#cbM{width:28px;height:28px;min-width:0;min-height:0;padding:0;border-radius:50%;background:#ffffff1a;font-size:14px;line-height:1}
+#chatBox #chatList{align-content:start;grid-auto-rows:min-content;flex:1;max-height:none;min-height:0;margin-bottom:0;font-size:13px}
+#cbR{display:flex;gap:6px;margin-top:6px}
+#chatBox input#chatIn{min-height:38px;border-radius:12px;font-size:13px;padding:0 10px}
+#chatBox #cbR button{min-width:0;min-height:38px;padding:0 12px;border-radius:12px}
+#chatBox.min{height:auto!important;min-height:0;resize:none}
+#chatBox.min #chatList,#chatBox.min #cbR{display:none}
+@media(min-width:1000px){body.chatOn #app{margin-left:max(calc((100vw - 900px)/2),calc(var(--cw,0px) + 28px));margin-right:auto}}
+@media(max-width:999px){#chatBox{left:8px;right:8px;top:auto;bottom:8px;width:auto!important;height:250px;max-width:none;resize:vertical}}
+#dOv{position:fixed;inset:0;z-index:10003;display:flex;align-items:center;justify-content:center;padding:14px;background:#000a;opacity:0;transition:opacity .25s}
+#dOv.on{opacity:1}
+#dCard{position:relative;max-width:460px;width:100%;max-height:82vh;display:flex;flex-direction:column;padding:18px 16px;border-radius:24px;background:linear-gradient(160deg,#2a1450,#150a2e);border:1px solid #ff5fa255;box-shadow:0 0 50px #ff4d8d44;box-sizing:border-box}
+#dList{overflow:auto;display:grid;gap:8px;align-content:start;margin-top:10px;min-height:60px}
+.dRow{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:14px;background:#ffffff0d;border:1px solid #ffffff14;font-size:13px}
+.dRow .nm{flex:1;min-width:0;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dRow .ch{padding:3px 9px;border-radius:99px;font-size:12px;font-weight:700;white-space:nowrap}
+.dRow .ch.ok{background:#3dff8b22;color:#3dff8b}.dRow .ch.fw{background:#ffa43c26;color:#ffb35c}.dRow .ch.bw{background:#4da6ff26;color:#6db8ff}.dRow .ch.na{background:#ffffff18;color:#bbb}
+.dRow button{min-width:0;min-height:32px;padding:0 12px;border-radius:10px;font-size:12px}
+#dX{position:absolute;top:10px;right:12px;width:32px;height:32px;min-width:0;min-height:0;padding:0;border-radius:50%;background:#ffffff18;font-size:16px;line-height:1}
+#pOv{position:fixed;inset:0;z-index:10002;display:flex;align-items:center;justify-content:center;padding:18px;background:#000a;opacity:0;transition:opacity .25s}
+#pOv.on{opacity:1}
+#pCard{max-width:380px;width:100%;padding:24px 20px;border-radius:24px;text-align:center;background:linear-gradient(160deg,#2a1450,#150a2e);border:1px solid #ff5fa255;box-shadow:0 0 50px #ff4d8d44;transform:scale(.9);transition:transform .3s}
+#pOv.on #pCard{transform:none}
+#pCard h3{margin:0 0 6px;font-size:20px}
+input#pubName,input#chatIn{flex:1;width:100%;min-width:0;min-height:48px;border-radius:14px;border:1px solid #ffffff2a;background:#0003;color:var(--fg);padding:0 12px;font:inherit}
+input#pubName::placeholder,input#chatIn::placeholder{color:#ffffff66}
+button.sw{width:48px;height:27px;min-width:0;min-height:0;padding:0;border-radius:99px;background:#ffffff26;position:relative;flex:none}
+button.sw::after{content:'';position:absolute;top:3px;left:3px;width:21px;height:21px;border-radius:50%;background:#fff;transition:left .25s}
+button.sw.on{background:linear-gradient(90deg,#ff4d8d,#ffc94d)}button.sw.on::after{left:24px}
+.pubRow{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:16px;background:#ffffff0d;border:1px solid #ffffff14;text-align:left}
+.pubRow .dot{width:8px;height:8px;border-radius:50%;background:#3dff8b;box-shadow:0 0 8px #3dff8b;display:inline-block;margin-right:6px}
+.pubRow .dot.off{background:#888;box-shadow:none}
+#chatList{align-content:start;grid-auto-rows:min-content;max-height:190px;overflow:auto;text-align:left;display:grid;gap:6px;font-size:14px;margin-bottom:8px;word-break:break-word}
+#mOv{position:fixed;inset:0;z-index:10001;display:flex;align-items:center;justify-content:center;padding:18px;background:#000b;opacity:0;transition:opacity .4s;overflow:hidden}
+#mOv.on{opacity:1}
+#mCard{position:relative;max-width:380px;width:100%;padding:34px 22px 24px;border-radius:28px;text-align:center;background:linear-gradient(160deg,#3a1560,#150a2e);border:1px solid #ffc94d77;box-shadow:0 0 70px #ffc94d55,0 0 120px #ff4d8d44;transform:scale(.6) translateY(30px);transition:transform .5s cubic-bezier(.2,1.4,.4,1),opacity .35s}
+#mOv.on #mCard{transform:none}
+#mCard.out{transform:scale(.6) translateY(-30px);opacity:0}
+#mX{position:absolute;top:10px;right:12px;width:34px;height:34px;min-width:0;min-height:0;padding:0;border-radius:50%;font-size:18px;line-height:1;background:#ffffff18}
+#mNum{font-size:64px;font-weight:900;line-height:1.05;background:linear-gradient(90deg,#ff4d8d,#ffc94d,#ff4d8d);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:mSh 2.5s linear infinite}
+@keyframes mSh{to{background-position:200% 0}}
+.cf{position:absolute;top:-30px;font-size:22px;animation:cfF linear forwards;pointer-events:none}
+@keyframes cfF{to{transform:translateY(110vh) rotate(540deg);opacity:.9}}`;
+  document.head.appendChild(st);
+
+  // ===== milestone popup =====
+  window.msPop=function(n){
+    if(document.getElementById('mOv'))return;
+    const o=document.createElement('div');o.id='mOv';
+    let cf='';for(let i=0;i<26;i++)cf+=`<span class="cf" style="left:${Math.random()*100}%;animation-duration:${2.5+Math.random()*2.5}s;animation-delay:${Math.random()*1.5}s">${['🎉','✨','🎶','🔥','💜','🎧'][i%6]}</span>`;
+    o.innerHTML=cf+`<div id="mCard"><button id="mX" aria-label="Close">✕</button>
+      <div style="font-size:11px;letter-spacing:.4em;opacity:.75">XENBERG PRESENTS</div>
+      <h3 style="margin:10px 0 2px;font-size:22px">🎉 Congratulations! 🎉</h3>
+      <div style="opacity:.85;font-size:15px">You are the</div>
+      <div id="mNum">${n}th</div>
+      <div style="font-size:16px;margin:2px 0 12px;font-weight:700">user of SyncRoom!</div>
+      <p style="font-size:14px;line-height:1.55;opacity:.9;margin:0 0 14px">Tum hamari crew ke <b>VIP</b> ho. Ab party sync mein hogi, ek saath, har phone pe 🔊</p>
+      <button class="pri" id="mGo" style="width:100%">Let's go 🚀</button></div>`;
+    document.body.appendChild(o);requestAnimationFrame(()=>o.classList.add('on'));
+    const cl=()=>{const c=o.querySelector('#mCard');if(c)c.classList.add('out');o.style.opacity='0';setTimeout(()=>o.remove(),450)};
+    o.addEventListener('click',e=>{if(!e.target.closest('#mCard')||e.target.id==='mX'||e.target.id==='mGo')cl()});
+  };
+
+  // ===== public rooms + chat =====
+  const PUB={on:false,name:'',msgs:[],ask:false,rooms:[],nick:'Guest'+(1000+Math.floor(Math.random()*9000))};
+  const E=x=>esc(String(x));
+  const msgH=m=>`<div><b style="color:${m.cmd?'#ffc94d':'#ff8fb8'}">${m.cmd?'👑 ':''}${E(m.nick)}</b> ${E(m.text)}</div>`;
+  window.pubCtlHTML=function(){
+    if(role!=='commander')return '';
+    const sw=`<button class="sw ${PUB.on||PUB.pend?'on':''}" onclick="pubTog()" aria-label="Public room"></button>`;
+    let x=`<div style="height:1px;background:#ffffff14;margin:12px 0"></div><div class="pubRow"><div style="flex:1"><b>🌐 Public room</b><div class="lbl" style="margin:2px 0 0">${PUB.on?'Listed on the home page: '+E(PUB.name):'Show this room on the home page'}</div></div>${sw}</div>`;
+    return x;
+  };
+  window.pubChatHTML=function(){return ''};
+  PUB.min=innerWidth<1000;
+  function renderMsgs(){const l=document.getElementById('chatList');if(l){l.innerHTML=PUB.msgs.map(msgH).join('')||'<div class="lbl">No messages yet. Say hi 👋</div>';l.scrollTop=l.scrollHeight}}
+  function sync(){
+    const want=PUB.on&&view==='room';let b=document.getElementById('chatBox');
+    if(!want){if(b){b.remove();document.body.classList.remove('chatOn');document.documentElement.style.setProperty('--cw','0px')}return}
+    if(b)return;
+    b=document.createElement('div');b.id='chatBox';if(PUB.min)b.classList.add('min');
+    if(PUB.w&&innerWidth>=1000){b.style.width=PUB.w+'px';b.style.height=PUB.h+'px'}
+    b.innerHTML=`<div id="cbH"><b>💬 Room chat</b><button id="cbM" title="Minimize">${PUB.min?'▢':'—'}</button></div><div id="chatList"></div><div id="cbR"><input id="chatIn" maxlength="200" placeholder="Say something..." autocomplete="off" onkeydown="if(event.key==='Enter')chatSend()"><button class="pri" onclick="chatSend()">Send</button></div>`;
+    document.body.appendChild(b);document.body.classList.add('chatOn');
+    b.querySelector('#cbM').onclick=()=>{PUB.min=!PUB.min;b.classList.toggle('min',PUB.min);b.querySelector('#cbM').textContent=PUB.min?'▢':'—'};
+    if(window.ResizeObserver)new ResizeObserver(()=>{if(!b.isConnected)return;document.documentElement.style.setProperty('--cw',b.offsetWidth+'px');if(!b.classList.contains('min')&&innerWidth>=1000){PUB.w=b.offsetWidth;PUB.h=b.offsetHeight}}).observe(b);
+    renderMsgs();
+  }
+  function refresh(){
+    const a=document.getElementById('pubCtl');if(a)a.innerHTML=pubCtlHTML();
+    sync();renderMsgs();
+  }
+  setInterval(sync,1000);
+  window.pubTog=function(){if(PUB.on){tx({type:'PUBLIC_SET',on:false});return}PUB.pend=true;refresh();pubModal()};
+  function pubModal(){
+    if(document.getElementById('pOv'))return;
+    const o=document.createElement('div');o.id='pOv';
+    o.innerHTML=`<div id="pCard"><h3>🌐 Name your public room</h3><div class="lbl" style="margin-bottom:12px">Everyone on the home page will see this name</div><input id="pubName" maxlength="30" placeholder="e.g. Fest After-Party" autocomplete="off"><div class="row" style="margin-top:12px"><button id="pNo" style="flex:1">Cancel</button><button class="pri" id="pYes" style="flex:1">Go public 🚀</button></div></div>`;
+    document.body.appendChild(o);requestAnimationFrame(()=>o.classList.add('on'));
+    const i=o.querySelector('#pubName');setTimeout(()=>i.focus(),60);
+    const no=()=>{PUB.pend=false;o.remove();refresh()};
+    const yes=()=>{const v=i.value.trim();if(!v){flash('Give your room a name first');return}
+      tx({type:'PUBLIC_SET',on:true,name:v});o.remove();clearTimeout(PUB.t);
+      PUB.t=setTimeout(()=>{if(!PUB.on){PUB.pend=false;refresh();flash('No reply from server. Restart / redeploy the new server.js')}},2500)};
+    o.querySelector('#pNo').onclick=no;o.querySelector('#pYes').onclick=yes;
+    i.onkeydown=e=>{if(e.key==='Enter')yes();if(e.key==='Escape')no()};
+    o.addEventListener('click',e=>{if(e.target===o)no()});
+  }
+  window.chatSend=function(){const i=document.getElementById('chatIn');if(!i)return;const t=i.value.trim();if(!t)return;tx({type:'CHAT',text:t,nick:role==='commander'?'Commander':PUB.nick});i.value=''};
+  window.PUBmsg=function(raw){
+    const m=JSON.parse(raw);
+    if(m.type==='JOINED'||m.type==='ROOM_ENDED'){PUB.on=false;PUB.name='';PUB.msgs=[];PUB.ask=false;refresh()}
+    else if(m.type==='PUBLIC_INFO'){PUB.on=!!m.on;PUB.name=m.name||'';PUB.msgs=Array.isArray(m.chat)?m.chat:[];PUB.ask=false;PUB.pend=false;refresh()}
+    else if(m.type==='CHAT_MSG'&&PUB.on){PUB.msgs.push(m.msg);if(PUB.msgs.length>50)PUB.msgs.shift();
+      const l=document.getElementById('chatList');
+      if(l){if(PUB.msgs.length===1)l.innerHTML='';l.insertAdjacentHTML('beforeend',msgH(m.msg));while(l.children.length>50)l.removeChild(l.firstChild);l.scrollTop=l.scrollHeight}}
+  };
+  // home: public room list
+  const listH=()=>PUB.rooms.length?PUB.rooms.map(r=>`<div class="pubRow"><div style="flex:1"><b>${E(r.name)}</b><div class="lbl" style="margin:2px 0 0"><span class="dot ${r.playing?'':'off'}"></span>${r.n} listening${r.playing?' · playing now':''}</div></div><button class="pri" style="min-width:0" onclick="pubJoin('${E(r.id)}')">Join</button></div>`).join(''):'<div class="lbl">No public rooms live right now. Start one from your room!</div>';
+  window.pubHome=function(){return `<section class="card"><h2>🌐 Public Rooms</h2><div id="pubList" style="display:grid;gap:8px">${listH()}</div></section>`};
+  window.pubJoin=function(id){if(!/^[A-Z0-9]{6}$/.test(id))return;roomId=id;view='join';pending={type:'ROOM_JOIN',roomId};connect()};
+  const poll=()=>{
+    if(view==='home'){
+      if(PUB.on||PUB.msgs.length){PUB.on=false;PUB.msgs=[];PUB.name='';PUB.ask=false;sync()}
+      fetch('/api/public-rooms',{cache:'no-store'}).then(r=>r.json()).then(a=>{if(!Array.isArray(a))return;PUB.rooms=a;const l=document.getElementById('pubList');if(l)l.innerHTML=listH()}).catch(()=>{});
+    }
+  };
+  poll();setInterval(poll,4000);
+})()}catch(e){console.warn('pub module',e)}
+
+
+
+// ---- Devices list + manual sync (commander) and slider-drag guard (additive) ----
+try{(function(){
+  // slider guard: no page redraw while a slider is held, and the drag keeps following the pointer
+  let sliding=false,pend=false;const od=window.draw;
+  window.draw=function(){if(sliding){pend=true;return}return od.apply(this,arguments)};
+  document.addEventListener('pointerdown',e=>{if(e.target&&e.target.type==='range'){sliding=true;try{e.target.setPointerCapture(e.pointerId)}catch{}}},true);
+  const rel=()=>{if(sliding){sliding=false;if(pend){pend=false;window.draw()}}};
+  ['pointerup','pointercancel'].forEach(t=>document.addEventListener(t,rel,true));addEventListener('blur',e=>{if(e.target===window)rel()});
+  // follower: report own drift every 2s
+  const ua=navigator.userAgent,lab=/iPhone|iPad/.test(ua)?'iPhone':/Android/.test(ua)?'Android':/Windows/.test(ua)?'Windows PC':/Mac/.test(ua)?'Mac':'Device',dn=lab+' ·'+String(uid).slice(-3);
+  setInterval(()=>{if(role!=='commander'&&view==='room'&&snap&&snap.state==='playing')tx({type:'DRIFT',d:Math.round(drift*1000),s:synced?1:0,n:dn})},2000);
+  // follower: jump to the Commander's position right now
+  window.forceSyncNow=function(){
+    if(role==='commander'||!snap||snap.state!=='playing')return;
+    try{tick()}catch{}
+    const t=Math.max(0,tgt);
+    try{
+      if(ytPlayer&&ytLoadedId&&typeof ytPlayer.seekTo==='function'&&snap.song&&ytLoadedId===snap.songId){lastSeek=now();ytPlayer.seekTo(t+(typeof ytLat==='number'?ytLat:0),true)}
+      else{au.currentTime=t+(typeof outLat==='function'?outLat():0)}
+    }catch(x){}
+    flash('Synced to the Commander');
+  };
+  // commander: devices panel (rows updated in place so buttons stay clickable)
+  let ov=null,timer=null,rows=new Map();
+  const status=d=>d===null?['na','Waiting']:Math.abs(d)<40?['ok','In sync']:d>0?['fw','Forward +'+d+' ms']:['bw','Backward −'+Math.abs(d)+' ms'];
+  window.devOpen=function(){
+    if(ov||role!=='commander')return;
+    ov=document.createElement('div');ov.id='dOv';rows=new Map();
+    ov.innerHTML=`<div id="dCard"><button id="dX" aria-label="Close">✕</button><h3 style="margin:0 0 4px;font-size:19px">👥 Devices &amp; sync</h3><div class="lbl" id="dSum" style="margin:0">Loading...</div><button class="pri" id="dAll" style="margin-top:10px;width:100%">⚡ Sync all out-of-sync devices</button><div id="dList"></div><p class="note" style="margin:10px 0 0">Forward = plays ahead of you · Backward = plays behind you. Sync jumps that device to your position right now.</p></div>`;
+    document.body.appendChild(ov);requestAnimationFrame(()=>ov.classList.add('on'));
+    const close=()=>{clearInterval(timer);const o=ov;ov=null;o.style.opacity='0';setTimeout(()=>o.remove(),250)};
+    ov.querySelector('#dX').onclick=close;ov.addEventListener('click',e=>{if(e.target===ov)close()});
+    ov.querySelector('#dAll').onclick=()=>{tx({type:'FORCE_SYNC',id:'all'});flash('Sync sent to all devices')};
+    const ask=()=>tx({type:'DEV_REQ'});ask();timer=setInterval(()=>{if(!ov||role!=='commander'||view!=='room'){clearInterval(timer);if(ov){ov.remove();ov=null}return}ask()},1500);
+  };
+  window.DEVhandle=function(m){
+    if(m.type==='FORCE_SYNC')return forceSyncNow();
+    if(m.type!=='DEVICES'||!ov)return;
+    const list=document.getElementById('dList');if(!list)return;
+    let ok=0,fw=0,bw=0;const seen=new Set();
+    m.list.forEach(x=>{
+      const [c,t]=status(x.d);if(c==='ok')ok++;else if(c==='fw')fw++;else if(c==='bw')bw++;
+      seen.add(x.id);let r=rows.get(x.id);
+      if(!r){const el=document.createElement('div');el.className='dRow';el.innerHTML='<span class="nm"></span><span class="ch"></span><button>Sync</button>';el.querySelector('button').onclick=()=>{tx({type:'FORCE_SYNC',id:x.id});flash('Sync sent')};list.appendChild(el);r={el,nm:el.querySelector('.nm'),ch:el.querySelector('.ch')};rows.set(x.id,r)}
+      const nm=(x.n||'Device')+' #'+x.id;if(r.nm.textContent!==nm)r.nm.textContent=nm;
+      r.ch.className='ch '+c;if(r.ch.textContent!==t)r.ch.textContent=t;
+    });
+    rows.forEach((r,id)=>{if(!seen.has(id)){r.el.remove();rows.delete(id)}});
+    const s=document.getElementById('dSum');
+    if(s)s.textContent=m.total?`${m.total} device${m.total===1?'':'s'}: ${ok} in sync · ${fw} forward · ${bw} backward`+(m.total>m.list.length?` (showing ${m.list.length})`:''):'No other devices connected yet.';
+  };
+  const op=window.PUBmsg;window.PUBmsg=function(raw){op&&op(raw);try{DEVhandle(JSON.parse(raw))}catch(x){}};
+})()}catch(e){console.warn('dev module',e)}
+
+
 draw();
 
 
-// ---- Debug panel (tap "build 15" under Presents) ----
+// ---- Debug panel (tap "build 16" under Presents) ----
 let dbgOn=false,dbgEl=null,dbgT=null,taps=0,tapT=0;
 function logoTap(){const n=Date.now();taps=n-tapT<1200?taps+1:1;tapT=n;if(taps>=5){taps=0;toggleDbg()}}
 function dbgText(){
   const sg=snap&&(snap.snapSong||snap.song),L=[];
   const yt=sg?useYT(sg):false;let ps='-';try{if(ytPlayer&&ytPlayer.getPlayerState)ps=ytPlayer.getPlayerState()}catch{}
-  L.push('build 15  role='+role+'  conn='+conn+'  ws='+(ws?ws.readyState:'none'));
+  L.push('build 16  role='+role+'  conn='+conn+'  ws='+(ws?ws.readyState:'none'));
   L.push('room='+roomId+'  devices='+(snap?snap.devices:'-')+'  state='+(snap?snap.state:'-'));
   L.push('song='+(sg?sg.id+' ['+sg.source+']':'-'));
   L.push('engine='+(sg?(yt?'YouTube embed':'server audio'):'-')+'  playOK='+playOK+'  audioOn='+audioOn);
@@ -1028,14 +1224,15 @@ try{(function(){
 @keyframes wIn{to{opacity:1;transform:none}}
 #wCard p{margin:14px 0 4px;font-size:14.5px;line-height:1.55;opacity:.92}
 #wGo{margin-top:12px;width:100%}
-#wChip{position:fixed;top:12px;right:12px;z-index:9999;width:42px;height:42px;min-width:0;min-height:0;padding:0;border-radius:50%;font-size:20px;background:linear-gradient(135deg,#ff4d8d,#ffc94d);box-shadow:0 0 18px #ff4d8d88;display:none}
-#wChip.pop{animation:wPop .6s}
+#wChip2{display:none;margin-top:7px;width:30px;height:30px;min-width:0;min-height:0;padding:0;border-radius:50%;font-size:15px;line-height:1;background:linear-gradient(135deg,#ff4d8d,#ffc94d);box-shadow:0 0 14px #ff4d8d88}
+body.wc #wChip2{display:block}
+#wChip2.pop{animation:wPop .6s}
 @keyframes wPop{0%{transform:scale(.4)}60%{transform:scale(1.3)}100%{transform:scale(1)}}`;
   document.head.appendChild(css);
-  const chip=document.createElement('button');chip.id='wChip';chip.textContent='🎉';chip.title='Why SyncRoom?';document.body.appendChild(chip);
+  const chipEl=()=>document.getElementById('wChip2');
   let ov=null;
   function open(){
-    if(ov)return;chip.style.display='none';
+    if(ov)return;document.body.classList.remove('wc');
     ov=document.createElement('div');ov.id='wOv';
     ov.innerHTML=`<div id="wCard"><button id="wX" aria-label="Close">✕</button>
       <div style="font-size:11px;letter-spacing:.4em;opacity:.7">XENBERG PRESENTS</div>
@@ -1051,11 +1248,11 @@ try{(function(){
   }
   function close(){
     if(!ov)return;const o=ov,c=o.querySelector('#wCard');ov=null;
-    chip.style.display='block';const a=c.getBoundingClientRect(),b=chip.getBoundingClientRect();
+    document.body.classList.add('wc');const a=c.getBoundingClientRect(),ch=chipEl(),b=ch?ch.getBoundingClientRect():{left:20,top:90,width:30,height:30};
     c.style.transform=`translate(${b.left+b.width/2-(a.left+a.width/2)}px,${b.top+b.height/2-(a.top+a.height/2)}px) scale(.05)`;c.style.opacity='0';o.style.opacity='0';
-    setTimeout(()=>{o.remove();chip.classList.remove('pop');void chip.offsetWidth;chip.classList.add('pop')},560);
+    setTimeout(()=>{o.remove();const x=chipEl();if(x){x.classList.remove('pop');void x.offsetWidth;x.classList.add('pop')}},560);
   }
-  chip.onclick=open;
+  window.wOpen=open;
   setTimeout(open,500);
 })()}catch(e){}
 </script>
