@@ -59,7 +59,7 @@ app.use('/vendor',express.static(path.join(D,'node_modules/qrcode/build'),{maxAg
 app.use(express.static(path.join(D,'public'),{maxAge:0}));
 app.get('/join/:id',(_,res)=>res.sendFile(path.join(D,'public','index.html')));
 
-const VISIT_BASE=88; // vibe count starts from here; new unique visitors are added on top
+const VISIT_BASE=105; // vibe count starts from here; new unique visitors are added on top
 const STATS_F=path.join(__dirname,'stats.json');let ST={visits:0,rooms:0,joins:0,seen:[]};const SEEN=new Set();
 try{ST={...ST,...JSON.parse(fs.readFileSync(STATS_F,'utf8'))}}catch{}
 ST.seen=Array.isArray(ST.seen)?ST.seen:[];ST.seen.forEach(x=>SEEN.add(x));

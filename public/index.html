@@ -777,7 +777,7 @@ function queue(){
   </section>`;
 }
 
-const HEADER=r=>`<header><div style="text-align:left"><b onclick="logoTap()">SYNC<i>ROOM</i></b><div onclick="toggleDbg()" style="font-size:11px;opacity:.6;margin-top:3px;cursor:pointer;text-decoration:underline">build 18 · tap for debug</div>${((role==='commander'||window.ADM)&&view==='room')?'<div onclick="window.devOpen&&devOpen()" style="font-size:12px;margin-top:5px;cursor:pointer;color:#ffc94d;font-weight:700">👥 Devices &amp; sync</div>':''}<button id="wChip2" onclick="window.wOpen&&wOpen()" title="Why SyncRoom?">🎉</button></div>${r?`<div style="text-align:right"><span class="lbl">${r}</span>${(role==='commander'&&view==='room')?'<div onclick="window.trOpen&&trOpen()" style="font-size:12px;margin-top:6px;cursor:pointer;color:#ffc94d;font-weight:700">🔁 Transfer Commander</div>':''}</div>`:''}</header><div class="brand">XENBERG</div><div class="presents">Presents</div>`;
+const HEADER=r=>`<header><div style="text-align:left"><b onclick="logoTap()">SYNC<i>ROOM</i></b><div onclick="toggleDbg()" style="font-size:11px;opacity:.6;margin-top:3px;cursor:pointer;text-decoration:underline">build 19 · tap for debug</div>${((role==='commander'||window.ADM)&&view==='room')?'<div onclick="window.devOpen&&devOpen()" style="font-size:12px;margin-top:5px;cursor:pointer;color:#ffc94d;font-weight:700">👥 Devices &amp; sync</div>':''}<button id="wChip2" onclick="window.wOpen&&wOpen()" title="Why SyncRoom?">🎉</button></div>${r?`<div style="text-align:right"><span class="lbl">${r}</span>${(role==='commander'&&view==='room')?'<div onclick="window.trOpen&&trOpen()" style="font-size:12px;margin-top:6px;cursor:pointer;color:#ffc94d;font-weight:700">🔁 Transfer Commander</div>':''}${(role!=='commander'&&view==='room')?'<div onclick="window.exitAsk&&exitAsk()" style="font-size:12px;margin-top:6px;cursor:pointer;color:#ff8a98;font-weight:700">🚪 Exit room</div>':''}</div>`:''}</header><div class="brand">XENBERG</div><div class="presents">Presents</div>`;
 
 function volumeCard(label){
   return `<section class="card">
@@ -1359,16 +1359,37 @@ try{(function(){
 })()}catch(e){console.warn('join/drag module',e)}
 
 
+
+// ---- Exit room button for admins and listeners (additive) ----
+try{(function(){
+  const st=document.createElement('style');
+  st.textContent=`#xOv{position:fixed;inset:0;z-index:10007;display:flex;align-items:center;justify-content:center;padding:18px;background:#000a;opacity:0;transition:opacity .25s}#xOv.on{opacity:1}
+#xCard{max-width:360px;width:100%;padding:24px 20px;border-radius:24px;text-align:center;background:linear-gradient(160deg,#2a1450,#150a2e);border:1px solid #ff5fa255;box-shadow:0 0 50px #ff4d8d44;transform:scale(.9);transition:transform .3s}#xOv.on #xCard{transform:none}
+#xCard h3{margin:0 0 6px;font-size:20px}#xCard .row{display:flex;gap:10px;margin-top:16px}#xCard button{flex:1}`;
+  document.head.appendChild(st);
+  window.exitAsk=function(){
+    if(document.getElementById('xOv')||role==='commander')return;
+    const o=document.createElement('div');o.id='xOv';
+    o.innerHTML='<div id="xCard"><h3>🚪 Exit this room?</h3><div class="lbl" style="margin:0">The music stops on this device. You can rejoin anytime with the room code.</div><div class="row"><button id="xNo">Stay</button><button class="pri" id="xYes">Exit</button></div></div>';
+    document.body.appendChild(o);requestAnimationFrame(()=>o.classList.add('on'));
+    const close=()=>{o.classList.remove('on');setTimeout(()=>o.remove(),250)};
+    o.querySelector('#xNo').onclick=close;
+    o.querySelector('#xYes').onclick=()=>{close();window.ADM=false;leaveRoom()};
+    o.addEventListener('click',e=>{if(e.target===o)close()});
+  };
+})()}catch(e){console.warn('exit module',e)}
+
+
 draw();
 
 
-// ---- Debug panel (tap "build 18" under Presents) ----
+// ---- Debug panel (tap "build 19" under Presents) ----
 let dbgOn=false,dbgEl=null,dbgT=null,taps=0,tapT=0;
 function logoTap(){const n=Date.now();taps=n-tapT<1200?taps+1:1;tapT=n;if(taps>=5){taps=0;toggleDbg()}}
 function dbgText(){
   const sg=snap&&(snap.snapSong||snap.song),L=[];
   const yt=sg?useYT(sg):false;let ps='-';try{if(ytPlayer&&ytPlayer.getPlayerState)ps=ytPlayer.getPlayerState()}catch{}
-  L.push('build 18  role='+role+'  conn='+conn+'  ws='+(ws?ws.readyState:'none'));
+  L.push('build 19  role='+role+'  conn='+conn+'  ws='+(ws?ws.readyState:'none'));
   L.push('room='+roomId+'  devices='+(snap?snap.devices:'-')+'  state='+(snap?snap.state:'-'));
   L.push('song='+(sg?sg.id+' ['+sg.source+']':'-'));
   L.push('engine='+(sg?(yt?'YouTube embed':'server audio'):'-')+'  playOK='+playOK+'  audioOn='+audioOn);
