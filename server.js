@@ -21,8 +21,12 @@ const ytId=u=>{const x=String(u||'').trim();if(/^[A-Za-z0-9_-]{11}$/.test(x))ret
 const ytPlaylistId=u=>{try{return new URL(String(u||'')).searchParams.get('list')}catch{return null}};
 async function youtubeVideoMeta(vid){
   if(ytMeta.has(vid))return ytMeta.get(vid);
-  try{const r=await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent('https://www.youtube.com/watch?v='+vid)}&format=json`,{headers:{'User-Agent':'Mozilla/5.0'}});if(r.ok){const j=await r.json();const m={title:j.title||'YouTube',artist:j.author_name||'YouTube',artwork:`https://i.ytimg.com/vi/${vid}/hqdefault.jpg`};ytMeta.set(vid,m);return m}}catch(e){}
-  return {title:'YouTube Audio',artist:'YouTube',artwork:`https://i.ytimg.com/vi/${vid}/hqdefault.jpg`};
+  const art=`https://i.ytimg.com/vi/${vid}/hqdefault.jpg`,wu=encodeURIComponent('https://www.youtube.com/watch?v='+vid),T=2500;
+  const oe=async u=>{const r=await fetch(u,{headers:{'User-Agent':'Mozilla/5.0'},signal:AbortSignal.timeout(T)});if(!r.ok)throw 0;const j=await r.json();if(!j.title)throw 0;return{title:j.title,artist:j.author_name||'YouTube',artwork:art}};
+  const pg=async()=>{const r=await fetch('https://www.youtube.com/watch?v='+vid,{headers:{'User-Agent':'Mozilla/5.0','Accept-Language':'en'},signal:AbortSignal.timeout(T)});const h=await r.text(),t=h.match(/<meta name="title" content="([^"]*)"/)||h.match(/<title>([^<]*)/);const ti=t&&clean(t[1]).replace(/ - YouTube$/,'');if(!ti)throw 0;const a=h.match(/<link itemprop="name" content="([^"]*)"/);return{title:ti,artist:a?clean(a[1]):'YouTube',artwork:art}};
+  // all sources at once: first good answer wins (was one-by-one, up to 5s each)
+  try{const m=await Promise.any([oe(`https://www.youtube.com/oembed?url=${wu}&format=json`),oe(`https://noembed.com/embed?url=${wu}`),pg()]);ytMeta.set(vid,m);return m}catch(e){}
+  return {title:'YouTube Audio',artist:'YouTube',artwork:art};
 }
 async function youtubePlaylistMeta(url){
   const playlistId=ytPlaylistId(url);if(!playlistId)throw new Error('Invalid YouTube playlist link.');
@@ -33,8 +37,8 @@ async function youtubePlaylistMeta(url){
   if(!ids.length)throw new Error('No playable videos found in that YouTube playlist.');
   const tracks=[];
   // Resolve metadata in small concurrent batches so playlist import stays fast even for large lists.
-  for(let i=0;i<ids.length;i+=8){
-    const batch=await Promise.all(ids.slice(i,i+8).map(async vid=>[vid,await youtubeVideoMeta(vid)]));
+  for(let i=0;i<ids.length;i+=25){
+    const batch=await Promise.all(ids.slice(i,i+25).map(async vid=>[vid,await youtubeVideoMeta(vid)]));
     for(const [vid,meta] of batch){
       const id='yt_'+vid,song={id,type:'youtube',source:'youtube',videoId:vid,title:meta.title,artist:meta.artist,album:'YouTube',artwork:meta.artwork,audio:null,duration:0};
       catalog.set(id,song);tracks.push(song);
@@ -53,11 +57,16 @@ function persistDuration(song,duration){song.duration=duration;if(uploaded.inclu
 const app=express();
 app.disable('x-powered-by');
 app.use((req,res,next)=>{if(req.path==='/'||/\.html$/i.test(req.path)||req.path.startsWith('/join/'))res.set('Cache-Control','no-store');next()});
+const zlib=require('zlib'),gz={};
+function sendHtml(req,res){const f=path.join(D,'public','index.html');fs.stat(f,(e,st)=>{if(e)return res.sendStatus(404);res.set({'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store',Vary:'Accept-Encoding'});
+ if(!/gzip/.test(req.get('accept-encoding')||''))return fs.createReadStream(f).pipe(res);
+ if(gz.m!==st.mtimeMs){gz.m=st.mtimeMs;gz.b=zlib.gzipSync(fs.readFileSync(f),{level:9})}res.set('Content-Encoding','gzip').end(gz.b)})}
+app.get(['/','/index.html'],sendHtml);
 app.use('/music',(req,res,next)=>/\.json$/i.test(req.path)?res.sendStatus(404):next());
 app.use('/music',express.static(MUSIC,{maxAge:'7d',index:false}));
 app.use('/vendor',express.static(path.join(D,'node_modules/qrcode/build'),{maxAge:'7d'}));
 app.use(express.static(path.join(D,'public'),{maxAge:0}));
-app.get('/join/:id',(_,res)=>res.sendFile(path.join(D,'public','index.html')));
+app.get('/join/:id',sendHtml);
 
 const VISIT_BASE=109; // vibe count starts from here; new unique visitors are added on top
 const STATS_F=path.join(__dirname,'stats.json');let ST={visits:0,rooms:0,joins:0,seen:[]};const SEEN=new Set();
@@ -93,7 +102,7 @@ function ytDlpUrl(vid){
       const [cmd,a,k]=ord[i++];
       execFile(cmd,a,{timeout:25000,windowsHide:true,maxBuffer:1<<20},(e,out)=>{
         const url=String(out||'').split('\n')[0].trim();
-        if(e||!/^https?:/.test(url))return next();
+        if(e||!/^https?:/.test(url)){console.log('YTDLP FAIL',cmd,String(e&&e.message||'').slice(0,300));return next();}
         ytGood=k;ytUrlCache.set(vid,{url,exp:Date.now()+90*60*1000});resolve(url);
       });
     };next();
@@ -156,13 +165,49 @@ async function spotifyMeta(url){
   const raw=Array.isArray(entity.trackList)?entity.trackList.slice(0,100):[entity];
   return {name,items:raw.map(it=>({title:it.title||entity.title||'Spotify Track',artist:it.subtitle||entity.subtitle||'Spotify Artist',duration:it.duration?Math.round(it.duration/1000):0})),cover};
 }
+// ---- Apple Music / JioSaavn / plain-text import (metadata -> YouTube audio match) ----
+const clean=t=>String(t||'').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#x27;|&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').trim();
+const metaTag=(h,p)=>{const m=h.match(new RegExp('<meta[^>]+(?:property|name)="'+p+'"[^>]+content="([^"]*)"','i'))||h.match(new RegExp('<meta[^>]+content="([^"]*)"[^>]+(?:property|name)="'+p+'"','i'));return m?clean(m[1]):''};
+const FALLIMG='https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=400';
+async function appleMeta(url){
+  const html=await (await fetch(url,{headers:{'User-Agent':'Mozilla/5.0'}})).text(),want=/[?&]i=\d+/.test(url),objs=[];
+  for(const m of html.matchAll(/<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/g)){try{const j=JSON.parse(m[1]);(Array.isArray(j)?j:[j]).forEach(o=>objs.push(o))}catch{}}
+  const cover=metaTag(html,'og:image')||FALLIMG,art=o=>clean((Array.isArray(o.byArtist)?o.byArtist[0]:o.byArtist)?.name||'');
+  const rec=objs.find(o=>o['@type']==='MusicRecording');
+  if(rec&&(want||!objs.some(o=>/MusicAlbum|MusicPlaylist/.test(o['@type'])))) return {name:clean(rec.name),cover,items:[{title:clean(rec.name),artist:art(rec)}]};
+  const col=objs.find(o=>/MusicAlbum|MusicPlaylist/.test(o['@type']));
+  if(col&&Array.isArray(col.track)&&col.track.length)return {name:clean(col.name),cover,items:col.track.slice(0,100).map(t=>({title:clean(t.name),artist:art(t)||art(col)}))};
+  const t=metaTag(html,'og:title').replace(/\s*on Apple Music.*$/i,'');if(!t)throw new Error('Apple Music link could not be read.');
+  const mm=t.match(/^(.*) by (.*)$/);return {name:t,cover,items:[{title:mm?mm[1]:t,artist:mm?mm[2]:''}]};
+}
+const slugTitle=sl=>decodeURIComponent(sl).replace(/-/g,' ').replace(/\s+/g,' ').trim();
+async function jioMeta(url){
+  // use the same JSON endpoint the JioSaavn website itself calls (HTML pages are JS-rendered, so scraping gave wrong songs)
+  const m=url.match(/jiosaavn\.com\/(song|album|featured|s\/playlist)\/[^?#]*?\/([^/?#]+)\/?(?:[?#].*)?$/i);
+  if(!m)throw new Error('Unsupported JioSaavn link. Use a song, album or playlist page link.');
+  const type=/^song$/i.test(m[1])?'song':/^album$/i.test(m[1])?'album':'playlist',token=m[2];
+  const api=`https://www.jiosaavn.com/api.php?__call=webapi.get&token=${encodeURIComponent(token)}&type=${type}&p=1&n=40&includeMetaTags=0&ctx=web6dot0&api_version=4&_format=json&_marker=0`;
+  let j;try{const r=await fetch(api,{headers:{'User-Agent':'Mozilla/5.0','Accept':'application/json'}});j=JSON.parse(await r.text())}catch{throw new Error('JioSaavn did not respond (it may block this server). Try typing the song name instead.')}
+  const raw=type==='song'?(j.songs||[]):(j.list||j.songs||[]);
+  if(!raw.length)throw new Error('No songs found in that JioSaavn link. Try typing the song name instead.');
+  const art=t=>clean((t.more_info?.artistMap?.primary_artists||[]).map(a=>a.name).filter(Boolean).slice(0,2).join(', ')||t.subtitle||'');
+  return {name:clean(j.title||j.name||raw[0].title||'JioSaavn'),cover:String(j.image||raw[0].image||FALLIMG).replace('150x150','500x500'),
+    items:raw.slice(0,40).map(t=>({title:clean(t.title),artist:art(t),duration:Number(t.more_info?.duration||t.duration)||0}))};
+}
+async function anyMeta(u){
+  if(/spotify\.com/i.test(u))return spotifyMeta(u);
+  if(/music\.apple\.com/i.test(u))return appleMeta(u);
+  if(/jiosaavn\.com|saavn\.com/i.test(u))return jioMeta(u);
+  if(/^https?:/i.test(u))throw new Error('Unsupported link. Use Spotify, Apple Music or JioSaavn.');
+  return {name:u,cover:FALLIMG,items:[{title:u,artist:''}]}; // plain song name
+}
 async function spotifyResolveItem(it,name,cover){
   const vid=await searchYouTubeForSong(it.title,it.artist);if(!vid)return null;
   const song={id:'yt_'+vid,type:'youtube',source:'spotify',videoId:vid,title:it.title,artist:it.artist,album:name,artwork:cover,audio:null,duration:it.duration||0};
   catalog.set(song.id,song);return song;
 }
 async function spotifyResolveAll(url,onBatch){
-  const meta=await spotifyMeta(url),out=[];
+  const meta=await anyMeta(url),out=[];
   // first playable track alone (so playback can start immediately), then the rest 10 at a time in parallel
   let i=0;
   for(;i<meta.items.length;i++){const t=await spotifyResolveItem(meta.items[i],meta.name,meta.cover);if(t){out.push(t);if(onBatch)await onBatch([t],true);i++;break}}
@@ -232,7 +277,7 @@ function setSong(r,id,play){
   clearTimeout(r.lt);
   const gate=!!play&&!!catalog.get(id).videoId;
   r.s={songId:id,state:play?(gate?'loading':'playing'):'paused',position:0,ts:Date.now()};
-  if(gate)r.lt=setTimeout(()=>{if(rooms.has(r.id)&&r.s.songId===id&&r.s.state==='loading'){r.s={...r.s,state:'playing',position:0,ts:Date.now()};bcast(r)}},12000);
+  if(gate)r.lt=setTimeout(()=>{if(rooms.has(r.id)&&r.s.songId===id&&r.s.state==='loading'){r.s={...r.s,state:'playing',position:0,ts:Date.now()};bcast(r)}},3500);
   warmAhead(r,id);
   return true;
 }
@@ -466,7 +511,8 @@ wss.on('connection',ws=>{
       const u=String(m.url||'').trim().slice(0,300),pl=isMgr(ws,r)&&m.play!==false;
       if(!u)return err(ws,m.type==='YOUTUBE_ADD'?'Paste a YouTube link.':'Paste a Spotify link.');
       if(r.pend>=4)return err(ws,'Busy importing. Try again in a moment.');
-      if(m.type==='YOUTUBE_ADD'){ytRoom(r,u,pl);return}
+      if(pl&&r.s.state==='playing'){r.s={...r.s,state:'paused',position:pos(r),ts:Date.now()};bcast(r)}
+      if(m.type==='YOUTUBE_ADD'&&(ytId(u)||ytPlaylistId(u))){ytRoom(r,u,pl);return}
       (async()=>{r.pend++;let n=0;try{
         const res=await spotifyResolveAll(u,async(tr,first)=>{if(!rooms.has(r.id))return;n+=tr.length;addSongsToRoom(r,tr,first&&pl,true);if(first)notice(r,pl?'Spotify: playing first song, loading the rest...':'Spotify: adding songs...')});
         if(rooms.has(r.id))notice(r,`Spotify: added ${n} song${n===1?'':'s'} from "${res.playlistName}".`);
