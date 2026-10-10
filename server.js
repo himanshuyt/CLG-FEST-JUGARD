@@ -81,11 +81,14 @@ app.get('/api/songs',(req,res)=>{
 
 // ---- YouTube audio proxy (fallback for embed-blocked videos; needs yt-dlp installed) ----
 const {execFile}=require('child_process'),{Readable}=require('stream');
+// auto-download the standalone yt-dlp binary on Linux hosts (Render) so no build command / python is needed
+const YTBIN=path.join(os.tmpdir(),'yt-dlp_bin');
+(async()=>{if(process.platform!=='linux'||fs.existsSync(YTBIN))return;try{const r=await fetch('https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux');if(!r.ok)throw new Error('HTTP '+r.status);fs.writeFileSync(YTBIN,Buffer.from(await r.arrayBuffer()),{mode:0o755});console.log('yt-dlp downloaded')}catch(e){console.error('yt-dlp download failed:',e.message)}})();
 const ytUrlCache=new Map();let ytGood=null;
 function ytDlpUrl(vid){
   const c=ytUrlCache.get(vid);if(c&&c.exp>Date.now())return Promise.resolve(c.url);
   const args=['-f','bestaudio[ext=m4a]/bestaudio','-g','--no-playlist','--no-warnings','--socket-timeout','10','https://www.youtube.com/watch?v='+vid];
-  const tries=[['yt-dlp',args],['python',['-m','yt_dlp',...args]],['python3',['-m','yt_dlp',...args]],['py',['-m','yt_dlp',...args]]].map((t,k)=>[...t,k]);
+  const tries=[[YTBIN,args],['yt-dlp',args],['python',['-m','yt_dlp',...args]],['python3',['-m','yt_dlp',...args]],['py',['-m','yt_dlp',...args]]].map((t,k)=>[...t,k]);
   const ord=ytGood==null?tries:[tries[ytGood],...tries.filter(t=>t[2]!==ytGood)];
   return new Promise((resolve,reject)=>{
     let i=0;const next=()=>{
@@ -241,7 +244,13 @@ async function importResolveItem(it,name,cover,kind){
   catalog.set(song.id,song);return song;
 }
 async function importResolveAll(kind,url,onBatch){
-  const meta=await(kind==='jiosaavn'?jioMeta:appleMeta)(url),out=[];
+  const meta=await(kind==='jiosaavn'?jioMeta:appleMeta)(url).catch(e=>{
+    // API/page failed: fall back to the song name inside the link, then match on YouTube
+    const m=String(url).match(kind==='jiosaavn'?/jiosaavn\.com\/(?:song|album)\/([^/?#]+)/i:/music\.apple\.com\/[a-z]{2}\/(?:song|album)\/([^/?#]+)/i);
+    if(!m)throw e;
+    let t=m[1];try{t=decodeURIComponent(t)}catch{}t=t.replace(/[-_]+/g,' ').trim();
+    return {name:t,cover:NOIMG,items:[{title:t,artist:'',duration:0}]};
+  }),out=[];
   let i=0;
   for(;i<meta.items.length;i++){const t=await importResolveItem(meta.items[i],meta.name,meta.cover,kind);if(t){out.push(t);if(onBatch)await onBatch([t],true);i++;break}}
   for(;i<meta.items.length;i+=10){
