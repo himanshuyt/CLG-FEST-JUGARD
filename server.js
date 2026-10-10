@@ -21,8 +21,19 @@ const ytId=u=>{const x=String(u||'').trim();if(/^[A-Za-z0-9_-]{11}$/.test(x))ret
 const ytPlaylistId=u=>{try{return new URL(String(u||'')).searchParams.get('list')}catch{return null}};
 async function youtubeVideoMeta(vid){
   if(ytMeta.has(vid))return ytMeta.get(vid);
-  try{const r=await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent('https://www.youtube.com/watch?v='+vid)}&format=json`,{headers:{'User-Agent':'Mozilla/5.0'}});if(r.ok){const j=await r.json();const m={title:j.title||'YouTube',artist:j.author_name||'YouTube',artwork:`https://i.ytimg.com/vi/${vid}/hqdefault.jpg`};ytMeta.set(vid,m);return m}}catch(e){}
-  return {title:'YouTube Audio',artist:'YouTube',artwork:`https://i.ytimg.com/vi/${vid}/hqdefault.jpg`};
+  let blocked=false;
+  try{const r=await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent('https://www.youtube.com/watch?v='+vid)}&format=json`,{headers:{'User-Agent':'Mozilla/5.0'}});if(r.ok){const j=await r.json();const m={title:j.title||'YouTube',artist:j.author_name||'YouTube',artwork:`https://i.ytimg.com/vi/${vid}/hqdefault.jpg`};ytMeta.set(vid,m);return m}blocked=[401,403,404].includes(r.status)}catch(e){}
+  return {title:'YouTube Audio',artist:'YouTube',artwork:`https://i.ytimg.com/vi/${vid}/hqdefault.jpg`,blocked};
+}
+// video that cannot be embedded (and usually cannot be fetched from a cloud server either): find an embeddable upload of the same title
+async function altEmbeddable(vid){
+  try{
+    const html=await(await fetch('https://www.youtube.com/watch?v='+vid,{headers:{'User-Agent':'Mozilla/5.0'},signal:AbortSignal.timeout(8000)})).text();
+    const t=(html.match(/<meta property="og:title" content="([^"]+)"/)||[])[1];if(!t)return null;
+    const title=t.replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'");
+    const id=await searchYouTubeForSong(title,'',999,vid);if(!id||id===vid)return null;
+    const meta=await youtubeVideoMeta(id);return meta.blocked?null:{id,meta};
+  }catch{return null}
 }
 async function youtubePlaylistMeta(url){
   const playlistId=ytPlaylistId(url);if(!playlistId)throw new Error('Invalid YouTube playlist link.');
@@ -34,7 +45,7 @@ async function youtubePlaylistMeta(url){
   const tracks=[];
   // Resolve metadata in small concurrent batches so playlist import stays fast even for large lists.
   for(let i=0;i<ids.length;i+=8){
-    const batch=await Promise.all(ids.slice(i,i+8).map(async vid=>[vid,await youtubeVideoMeta(vid)]));
+    const batch=await Promise.all(ids.slice(i,i+8).map(async vid=>{let v=vid,m=await youtubeVideoMeta(vid);if(m.blocked){const x=await altEmbeddable(vid);if(x){v=x.id;m=x.meta}}return [v,m]}));
     for(const [vid,meta] of batch){
       const id='yt_'+vid,song={id,type:'youtube',source:'youtube',videoId:vid,title:meta.title,artist:meta.artist,album:'YouTube',artwork:meta.artwork,audio:null,duration:0};
       catalog.set(id,song);tracks.push(song);
@@ -44,8 +55,8 @@ async function youtubePlaylistMeta(url){
 }
 async function resolveYouTube(input){
   if(ytPlaylistId(input))return {type:'playlist',...await youtubePlaylistMeta(input)};
-  const vid=ytId(input);if(!vid)throw new Error('Invalid YouTube link.');
-  const meta=await youtubeVideoMeta(vid),song={id:'yt_'+vid,type:'youtube',source:'youtube',videoId:vid,title:meta.title,artist:meta.artist,album:'YouTube',artwork:meta.artwork,audio:null,duration:0};catalog.set(song.id,song);return {type:'track',playlistName:meta.title,tracks:[song]};
+  let vid=ytId(input);if(!vid)throw new Error('Invalid YouTube link.');
+  let meta=await youtubeVideoMeta(vid);if(meta.blocked){const x=await altEmbeddable(vid);if(x){vid=x.id;meta=x.meta}}const song={id:'yt_'+vid,type:'youtube',source:'youtube',videoId:vid,title:meta.title,artist:meta.artist,album:'YouTube',artwork:meta.artwork,audio:null,duration:0};catalog.set(song.id,song);return {type:'track',playlistName:meta.title,tracks:[song]};
 }
 
 function persistDuration(song,duration){song.duration=duration;if(uploaded.includes(song))saveUploads();else if(baseSongs.includes(song))saveLibrary()}
@@ -145,19 +156,18 @@ app.get('/yt-audio/:vid',async(req,res)=>{
 });
 app.post('/api/youtube/resolve',express.json({limit:'1mb'}),async(req,res)=>{try{res.json(await resolveYouTube(req.body?.url||''))}catch(e){res.status(400).json({error:e.message||'Could not resolve YouTube link.'})}});
 const ytSearchCache=new Map();
-async function searchYouTubeForSong(title,artist){
-  const query=`${title} ${artist}`.trim();if(ytSearchCache.has(query))return ytSearchCache.get(query);
+async function searchYouTubeForSong(title,artist,maxMin,skip){
+  maxMin=maxMin||12;const query=`${title} ${artist}`.trim(),ck=query+'|'+maxMin;if(!skip&&ytSearchCache.has(ck))return ytSearchCache.get(ck);
   try{
     const r=await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(query+' audio')}`,{headers:{'User-Agent':'Mozilla/5.0'}});const html=await r.text();
-    const ids=[],re=/\"videoId\":\"([A-Za-z0-9_-]{11})\"/g;let m;while((m=re.exec(html))&&ids.length<8)if(!ids.includes(m[1]))ids.push(m[1]);
-    // skip long compilations/jukeboxes (>12 min) and videos that block embedding (oEmbed fails), so the synced player can actually play it
+    const ids=[],re=/\"videoId\":\"([A-Za-z0-9_-]{11})\"/g;let m;while((m=re.exec(html))&&ids.length<10)if(!ids.includes(m[1])&&m[1]!==skip)ids.push(m[1]);
     const mins=id=>{const x=html.match(new RegExp('\"videoId\":\"'+id+'\"[\\s\\S]{0,2500}?\"lengthText\":\\{[^}]*?\"simpleText\":\"([0-9:]+)\"'));if(!x)return 0;const p=x[1].split(':').map(Number);return p.length>2?999:p[0]+p[1]/60};
     for(const id of ids){
-      if(mins(id)>12)continue;
+      if(mins(id)>maxMin)continue;
       const ok=await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent('https://www.youtube.com/watch?v='+id)}&format=json`,{headers:{'User-Agent':'Mozilla/5.0'},signal:AbortSignal.timeout(4000)}).then(x=>x.ok).catch(()=>true);
-      if(ok){ytSearchCache.set(query,id);return id}
+      if(ok){if(!skip)ytSearchCache.set(ck,id);return id}
     }
-    if(ids[0]){ytSearchCache.set(query,ids[0]);return ids[0]}
+    if(!skip&&ids[0]){ytSearchCache.set(ck,ids[0]);return ids[0]}
   }catch(e){}
   return null}
 
